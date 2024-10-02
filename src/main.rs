@@ -2411,6 +2411,8 @@ fn generate_operation_response_enum(state: &mut State, operation: &Operation, re
     state.push(format!("\npub enum {} {{\n", operation.response_name));
     generate_ffi_free(state, &operation.response_name);
     let mut response_enum_constants = Vec::new();
+    let mut enum_object_names = HashMap::new();
+    let mut enum_hdr_object_names = HashMap::new();
     if responses.is_object() {
         for (code, elem) in responses.entries() {
             if !elem.is_object() {
@@ -2452,12 +2454,15 @@ fn generate_operation_response_enum(state: &mut State, operation: &Operation, re
                     }
                 }
 
+                enum_object_names.insert(enum_name.clone(), enum_param_name.clone());
+
                 if elem["headers"].is_object() {
                     let hdr_name = format!("{}{}Header", operation.response_name, code.to_uppercase());
                     generate_ffi_operation_response_body_getter(state, &operation.response_name, &enum_name, &enum_param_name, 2);
                     generate_ffi_operation_response_header_getter(state, &operation.response_name, &enum_name, &hdr_name, 2);
                     state.push(format!(" {},", hdr_name));
-                    response_enum_constants.push((enum_name, 2));
+                    response_enum_constants.push((enum_name.clone(), 2));
+                    enum_hdr_object_names.insert(enum_name.clone(), hdr_name.clone());
                 } else {
                     generate_ffi_operation_response_body_getter(state, &operation.response_name, &enum_name, &enum_param_name, 1);
                     response_enum_constants.push((enum_name, 1));
@@ -2471,8 +2476,10 @@ fn generate_operation_response_enum(state: &mut State, operation: &Operation, re
                 state.push(enum_name.as_str());
                 state.push("(");
                 if elem["headers"].is_object() {
-                    state.push(format!(" {}{}Header,", operation.response_name, code.to_uppercase()));
-                    response_enum_constants.push((enum_name, 1));
+                    let hdr_name = format!("{}{}Header", operation.response_name, code.to_uppercase());
+                    state.push(format!(" {},", hdr_name.clone()));
+                    response_enum_constants.push((enum_name.clone(), 1));
+                    enum_hdr_object_names.insert(enum_name.clone(), hdr_name.clone());
                 } else {
                     response_enum_constants.push((enum_name, 0));
                 }
@@ -2484,7 +2491,57 @@ fn generate_operation_response_enum(state: &mut State, operation: &Operation, re
     response_enum_constants.push(("Custom".to_string(), 3));
     state.push("    Custom(Box<dyn Any>, StatusCode, HeaderMap)\n");
     state.push("}\n");
+
+    state.push(format!("\nimpl {} {{\n", operation.response_name));
+    for (name, count) in &response_enum_constants {
+        let result_tuple = match count {
+            0 => "()".to_string(),
+            1 => enum_object_names.get(name).unwrap().clone(),
+            2 => format!("({}, {})", enum_object_names.get(name).unwrap(), enum_hdr_object_names.get(name).unwrap()),
+            3 => continue,
+            _=> panic!("Not implemented yet {}", count)
+        };
+
+        state.push(format!("    pub fn is_{}(&self) -> bool {{\n", name.to_snake_case()));
+        state.push("        match self {\n");        match count {
+            0 => state.push(format!("            {}::{}() => true,\n",  operation.response_name, name)),
+            1 => state.push(format!("            {}::{}(_) => true,\n",  operation.response_name, name)),
+            2 => state.push(format!("            {}::{}(_, _) => true,\n",  operation.response_name, name)),
+            _=> panic!("Not implemented yet {}", count)
+        }
+        state.push("            _=> false\n");
+        state.push("        }\n");
+        state.push("    }\n");
+
+        state.push(format!("    pub fn try_into_{}(self) -> Option<{}> {{\n", name.to_snake_case(), result_tuple));
+        state.push("        match self {\n");        match count {
+            0 => state.push(format!("            {}::{}() => Some(()),\n",  operation.response_name, name)),
+            1 => state.push(format!("            {}::{}(a) => Some(a),\n",  operation.response_name, name)),
+            2 => state.push(format!("            {}::{}(a, b) => Some(a, b),\n",  operation.response_name, name)),
+            _=> panic!("Not implemented yet {}", count)
+        }
+        state.push("            _=> None\n");
+        state.push("        }\n");
+        state.push("    }\n");
+
+        state.push(format!("    pub fn try_clone_as_{}(&self) -> Option<{}> {{\n", name.to_snake_case(), result_tuple));
+        state.push("        match self {\n");        match count {
+            0 => state.push(format!("            {}::{}() => Some(()),\n",  operation.response_name, name)),
+            1 => state.push(format!("            {}::{}(a) => Some(a.clone()),\n",  operation.response_name, name)),
+            2 => state.push(format!("            {}::{}(a, b) => Some(a.clone(), b.clone()),\n",  operation.response_name, name)),
+            _=> panic!("Not implemented yet {}", count)
+        }
+        state.push("            _=> None\n");
+        state.push("        }\n");
+        state.push("    }\n");
+
+        //state.push(format!("pub fn into_{}(Self) -> Option<{}>", name));
+    }
+    state.push("}\n");
+
     state.insert_ffi();
+
+
     //FFI Enum wrapper
     state.push_ffi("#[cfg(feature = \"ffi\")]\n");
     state.push_ffi("#[repr(C)]\n");

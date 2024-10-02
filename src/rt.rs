@@ -623,7 +623,7 @@ pub enum Stream {
 }
 
 #[derive(Clone)]
-pub(crate) struct VecStream(Arc<Mutex<VecStreamInner>>);
+pub struct VecStream(Arc<Mutex<VecStreamInner>>);
 
 struct VecStreamInner {
     data: Vec<u8>,
@@ -751,7 +751,7 @@ impl Stream {
 ///
 #[cfg(feature = "blocking")]
 #[derive(Clone)]
-pub(crate) struct BlockingStream {
+pub struct BlockingStream {
     pub reader: Arc<Mutex<Box<dyn io::Read+Send>>>,
     #[cfg(feature = "async")]
     data: Arc<Mutex<Option<io::Result<Vec<u8>>>>>,
@@ -983,7 +983,7 @@ impl From<reqwest::Response> for Stream {
 #[cfg(feature = "async")]
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone)]
-pub(crate) struct AsyncStream(pub Arc<Mutex<Box<dyn tokio::io::AsyncRead+Send+Unpin>>>);
+pub struct AsyncStream(pub Arc<Mutex<Box<dyn tokio::io::AsyncRead+Send+Unpin>>>);
 
 #[cfg(feature = "async")]
 #[cfg(not(target_arch = "wasm32"))]
