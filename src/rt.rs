@@ -6830,6 +6830,19 @@ impl ApiRequestBuilder {
         self
     }
 
+    pub fn add_string_array_query<A: ToString>(mut self, key: A, value: &OStringArray) -> ApiRequestBuilder {
+        let key = key.to_string();
+        if let Some(value) = value.0.as_ref() {
+            for n in value.0.iter() {
+                if let Some(value) = n.0.as_ref() {
+                    self.query.push((key.clone(), value.clone()));
+                }
+            };
+        };
+
+        self
+    }
+
     #[cfg(feature = "async")]
     pub async fn build_async<T: ToString>(self, base_url: T, client: &reqwest::Client) -> Result<reqwest::Request, ApiError> {
         let method = Method::from_str(self.method.as_str());

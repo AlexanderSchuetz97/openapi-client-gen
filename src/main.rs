@@ -722,7 +722,7 @@ fn sanitize_schemas(root: &mut JsonValue) {
             panic!("Too much recursion!")
         }
         let old_state = root["components"]["schemas"].clone();
-        for (name, value) in old_state.entries() {
+        'outer: for (name, value) in old_state.entries() {
             match classify_schema(value) {
                 Schema::Invalid => {
                     classify_schema(value);
@@ -742,6 +742,27 @@ fn sanitize_schemas(root: &mut JsonValue) {
                     root["components"]["schemas"][item_name.as_str()] = implementation.clone();
                     root["components"]["schemas"][name]["additionalProperties"] = JsonValue::Object(Object::new());
                     root["components"]["schemas"][name]["additionalProperties"]["$ref"] = JsonValue::String(format!("#/components/schemas/{}", item_name))
+                }
+                Schema::CompositeObjectImpl(implementation) => {
+                    let mut merged = JsonValue::Object(Object::new());
+                    merged["type"] = "object".into();
+                    merged["properties"] = JsonValue::Object(Object::new());
+                    for (idx, child) in implementation.members().enumerate() {
+                        match classify_schema(child) {
+                            Schema::Ref(referent) => {
+                                root["components"]["schemas"][name]["allOf"][idx] = root["components"]["schemas"][referent.as_str()].clone();
+                                continue 'outer;
+                            }
+                            Schema::ObjectImpl(implementation) => {
+                                for (field_name, field_schema) in implementation["properties"].entries() {
+                                    merged["properties"][field_name] = field_schema.clone();
+                                }
+                            }
+                            other => panic!("Composite contains {other} which is not yet implemented raw: {}", implementation.to_string()),
+                        }
+                    }
+
+                    root["components"]["schemas"][name] = merged;
                 }
                 Schema::ObjectImpl(implementation) => {
                     for (field_name, field_schema) in implementation["properties"].entries() {
@@ -1881,7 +1902,8 @@ fn generate_operation(state: &mut State, operation: &Operation) {
             Schema::Int32 => ("OI32", "*const i32"),
             Schema::Double => ("OF64", "*const f64"),
             Schema::Boolean => ("OBool", "*const bool"),
-            _=> panic!("{} {} param type not supported yet", operation.name, param_name_raw),
+            Schema::StringArray => ("&OStringArray", "*const StringArray"),
+            other => panic!("{other} {} {} param type not supported yet", operation.name, param_name_raw),
         };
 
         state.push_path(format!(", {}: {}", param_name, param_type));
@@ -1905,10 +1927,10 @@ fn generate_operation(state: &mut State, operation: &Operation) {
                         match classify_schema(&content_type_ref["schema"]) {
                             Schema::Ref(ref_name) => {
                                 let ref_name = state.struct_name_map.get(ref_name.as_str()).unwrap().clone();
-                                state.push_path(format!(", request_body: O{}", ref_name));
-                                state.push_async_path(format!(", request_body: O{}", ref_name));
+                                state.push_path(format!(", request_body: &O{}", ref_name));
+                                state.push_async_path(format!(", request_body: &O{}", ref_name));
                                 state.push_ffi(format!(", request_body: *const {}", ref_name));
-                                json_entity = Some("request_body");
+                                json_entity = Some("request_body.as_ref()");
                             }
                             _=> panic!("{} request body type not supported for yet application/json", operation.name),
                         }
@@ -1975,36 +1997,54 @@ fn generate_operation(state: &mut State, operation: &Operation) {
                 state.push_ffi("    } else {\n");
                 state.push_ffi("        OString::default()\n");
                 state.push_ffi("    };\n");
+                param_call += param_name;
+                param_call += ", ";
             }
             Schema::Int64 => {
                 state.push_ffi(format!("    let {} = match {}.as_ref() {{\n", param_name, param_name));
                 state.push_ffi("        None => OI64::default(),\n");
                 state.push_ffi("        Some(data) => OI64::from(*data)\n");
                 state.push_ffi("    };\n");
+                param_call += param_name;
+                param_call += ", ";
             }
             Schema::Int32 => {
                 state.push_ffi(format!("    let {} = match {}.as_ref() {{\n", param_name, param_name));
                 state.push_ffi("        None => OI32::default(),\n");
                 state.push_ffi("        Some(data) => OI32::from(*data)\n");
                 state.push_ffi("    };\n");
+                param_call += param_name;
+                param_call += ", ";
             }
             Schema::Double => {
                 state.push_ffi(format!("    let {} = match {}.as_ref() {{\n", param_name, param_name));
                 state.push_ffi("        None => OF64::default(),\n");
                 state.push_ffi("        Some(data) => OF64::from(*data)\n");
                 state.push_ffi("    };\n");
+                param_call += param_name;
+                param_call += ", ";
             }
             Schema::Boolean => {
                 state.push_ffi(format!("    let {} = match {}.as_ref() {{\n", param_name, param_name));
                 state.push_ffi("        None => OBool::default(),\n");
                 state.push_ffi("        Some(data) => OBool::from(*data)\n");
                 state.push_ffi("    };\n");
+                param_call += param_name;
+                param_call += ", ";
             }
-            _=> panic!("{} {} param type not supported yet", operation.name, param_name_raw),
+            Schema::StringArray => {
+                state.push_ffi(format!("    let {} = match {}.as_ref() {{\n", param_name, param_name));
+                state.push_ffi("        None => OStringArray::default(),\n");
+                state.push_ffi("        Some(data) => OStringArray::from(data.clone())\n");
+                state.push_ffi("    };\n");
+                param_call += "&";
+                param_call += param_name;
+                param_call += ", ";
+            }
+            other => panic!("{other} {} {} param type not supported yet", operation.name, param_name_raw),
         };
 
-        param_call += param_name;
-        param_call += ", "; //TODO make this less ugly
+
     }
 
     match &desc["requestBody"] {
@@ -2021,7 +2061,7 @@ fn generate_operation(state: &mut State, operation: &Operation) {
                                 state.push_ffi(format!("        None => O{}::default(),\n", ref_name));
                                 state.push_ffi(format!("        Some(request_body) => O{}::from(request_body.clone())\n", ref_name));
                                 state.push_ffi("    };\n");
-                                param_call += "request_body";
+                                param_call += "&request_body";
                             }
                             _=> panic!("{} request body type not supported for yet application/json", operation.name),
                         }
@@ -2133,6 +2173,10 @@ fn generate_operation(state: &mut State, operation: &Operation) {
                         state.push_path(format!("            .add_optional_query(\"{}\", {}.0.as_ref())\n", raw_param_name, param_name));
                         state.push_async_path(format!("            .add_optional_query(\"{}\", {}.0.as_ref())\n", raw_param_name, param_name));
                     },
+                    Schema::StringArray => {
+                        state.push_path(format!("            .add_string_array_query(\"{}\", {})\n", raw_param_name, param_name));
+                        state.push_async_path(format!("            .add_string_array_query(\"{}\", {})\n", raw_param_name, param_name));
+                    }
                     _=> panic!("{} {} param type not supported yet for query parameters", operation.name, raw_param_name),
                 };
             }
@@ -2517,7 +2561,7 @@ fn generate_operation_response_enum(state: &mut State, operation: &Operation, re
         state.push("        match self {\n");        match count {
             0 => state.push(format!("            {}::{}() => Some(()),\n",  operation.response_name, name)),
             1 => state.push(format!("            {}::{}(a) => Some(a),\n",  operation.response_name, name)),
-            2 => state.push(format!("            {}::{}(a, b) => Some(a, b),\n",  operation.response_name, name)),
+            2 => state.push(format!("            {}::{}(a, b) => Some((a, b)),\n",  operation.response_name, name)),
             _=> panic!("Not implemented yet {}", count)
         }
         state.push("            _=> None\n");
@@ -2528,7 +2572,7 @@ fn generate_operation_response_enum(state: &mut State, operation: &Operation, re
         state.push("        match self {\n");        match count {
             0 => state.push(format!("            {}::{}() => Some(()),\n",  operation.response_name, name)),
             1 => state.push(format!("            {}::{}(a) => Some(a.clone()),\n",  operation.response_name, name)),
-            2 => state.push(format!("            {}::{}(a, b) => Some(a.clone(), b.clone()),\n",  operation.response_name, name)),
+            2 => state.push(format!("            {}::{}(a, b) => Some((a.clone(), b.clone())),\n",  operation.response_name, name)),
             _=> panic!("Not implemented yet {}", count)
         }
         state.push("            _=> None\n");
