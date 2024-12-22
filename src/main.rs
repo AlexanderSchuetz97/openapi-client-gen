@@ -1239,7 +1239,7 @@ fn generate_model_object(state: &mut State, name: &str, object: &JsonValue) {
 
 fn generate_ffi_from_json<T: ToString>(state: &mut State, name: T) {
     let name = name.to_string();
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}_from_json(json: *const c_char) -> *mut {} {{\n", state.ffi_prefix, name, name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}_from_json(json: *const c_char) -> *mut {} {{\n", state.ffi_prefix, name, name));
     state.push_ffi("    if json.is_null() {\n");
     state.push_ffi("            ffi_abort(\"from_json(NULL)\");\n");
     state.push_ffi("            unreachable!()\n");
@@ -1255,7 +1255,7 @@ fn generate_ffi_from_json<T: ToString>(state: &mut State, name: T) {
     state.push_ffi("    }\n");
     state.push_ffi("}\n");
 
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}_to_json(inst: *const {}, buffer: *mut c_char, len: *mut usize) -> bool {{\n", state.ffi_prefix, name, name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}_to_json(inst: *const {}, buffer: *mut c_char, len: *mut usize) -> bool {{\n", state.ffi_prefix, name, name));
     state.push_ffi("    if len.is_null() {\n");
     state.push_ffi("        ffi_abort(\"to_json called with len null pointer\");\n");
     state.push_ffi("        unreachable!()\n");
@@ -1292,11 +1292,11 @@ fn generate_ffi_from_json<T: ToString>(state: &mut State, name: T) {
 fn generate_ffi_map<T: ToString>(state: &mut State, name: T) {
     let name = name.to_string();
     let name = state.struct_name_map.get(name.as_str()).unwrap().clone();
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}Map_{}_new() -> *mut Map<O{}> {{\n", state.ffi_prefix, name, name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}Map_{}_new() -> *mut Map<O{}> {{\n", state.ffi_prefix, name, name));
     state.push_ffi("    Box::into_raw(Box::new(Map::default()))\n");
     state.push_ffi("}\n");
 
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}Map_{}{}_free(inst: *mut Map<O{}>) {{\n", state.ffi_prefix, state.ffi_accessor_prefix, name, name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}Map_{}{}_free(inst: *mut Map<O{}>) {{\n", state.ffi_prefix, state.ffi_accessor_prefix, name, name));
     state.push_ffi("    if inst.is_null() {\n");
     state.push_ffi("        ffi_abort(\"free(NULL)\");\n");
     state.push_ffi("        unreachable!()\n");
@@ -1305,7 +1305,7 @@ fn generate_ffi_map<T: ToString>(state: &mut State, name: T) {
     state.push_ffi("}\n");
 
 
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}Map_{}_keys(inst: *const  Map<O{}>) -> *mut StringArray {{\n", state.ffi_prefix, name, name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}Map_{}_keys(inst: *const  Map<O{}>) -> *mut StringArray {{\n", state.ffi_prefix, name, name));
     state.push_ffi("    match inst.as_ref() {\n");
     state.push_ffi("        None => {\n");
     state.push_ffi("            ffi_abort(\"Map_keys was called with a inst null pointer\");\n");
@@ -1317,7 +1317,7 @@ fn generate_ffi_map<T: ToString>(state: &mut State, name: T) {
     state.push_ffi("    }\n");
     state.push_ffi("}\n");
 
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}Map_{}_remove(inst: *mut Map<O{}>, key: *const c_char) {{\n", state.ffi_prefix, name, name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}Map_{}_remove(inst: *mut Map<O{}>, key: *const c_char) {{\n", state.ffi_prefix, name, name));
     state.push_ffi("    if key.is_null() {\n");
     state.push_ffi("        ffi_abort(\"Map_remove was called with a key null pointer\");\n");
     state.push_ffi("        unreachable!()\n");
@@ -1342,7 +1342,7 @@ fn generate_ffi_map<T: ToString>(state: &mut State, name: T) {
     state.push_ffi("    }\n");
     state.push_ffi("}\n");
 
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}Map_{}_set(inst: *mut Map<O{}>, key: *const c_char, value: *const {}) {{\n", state.ffi_prefix, name, name, name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}Map_{}_set(inst: *mut Map<O{}>, key: *const c_char, value: *const {}) {{\n", state.ffi_prefix, name, name, name));
     state.push_ffi("    if key.is_null() {\n");
     state.push_ffi("        ffi_abort(\"Map_set was called with a key null pointer\");\n");
     state.push_ffi("        unreachable!()\n");
@@ -1371,7 +1371,7 @@ fn generate_ffi_map<T: ToString>(state: &mut State, name: T) {
     state.push_ffi("    }\n");
     state.push_ffi("}\n");
 
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}Map_{}_get(inst: *const Map<O{}>, key: *const c_char) -> *mut {} {{\n", state.ffi_prefix, name, name, name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}Map_{}_get(inst: *const Map<O{}>, key: *const c_char) -> *mut {} {{\n", state.ffi_prefix, name, name, name));
     state.push_ffi("    if key.is_null() {\n");
     state.push_ffi("        ffi_abort(\"Map_get was called with a key null pointer\");\n");
     state.push_ffi("        unreachable!()\n");
@@ -1413,7 +1413,7 @@ fn generate_ffi_maps(state: &mut State) {
 
 fn generate_ffi_free_new<T: ToString>(state: &mut State, name: T) {
     let name = name.to_string();
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}_new() -> *mut {} {{\n", state.ffi_prefix, name, name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}_new() -> *mut {} {{\n", state.ffi_prefix, name, name));
     state.push_ffi(format!("    Box::into_raw(Box::new({}::default()))\n", name));
     state.push_ffi("}\n");
     generate_ffi_free(state, name);
@@ -1421,7 +1421,7 @@ fn generate_ffi_free_new<T: ToString>(state: &mut State, name: T) {
 
 fn generate_ffi_free<T: ToString>(state: &mut State, name: T) {
     let name = name.to_string();
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_free(inst: *mut {}) {{\n", state.ffi_prefix, state.ffi_accessor_prefix, name, name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_free(inst: *mut {}) {{\n", state.ffi_prefix, state.ffi_accessor_prefix, name, name));
     state.push_ffi("    if inst.is_null() {\n");
     state.push_ffi("        ffi_abort(\"free(NULL)\");\n");
     state.push_ffi("        unreachable!()\n");
@@ -1435,7 +1435,7 @@ fn generate_string_ffi_getter_setter<A: ToString, B: ToString, C: ToString>(stat
     let field_name = field_name.to_string();
     let ffi_fn_name = ffi_fn_name.to_string();
     //FFI String getter
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_get(inst: *const {}, buffer: *mut c_char, len: *mut usize) -> bool {{\n", state.ffi_prefix, state.ffi_accessor_prefix, ffi_fn_name, name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_get(inst: *const {}, buffer: *mut c_char, len: *mut usize) -> bool {{\n", state.ffi_prefix, state.ffi_accessor_prefix, ffi_fn_name, name));
     state.push_ffi("    if inst.is_null() {\n");
     state.push_ffi(format!("        ffi_abort(\"called {}_get with null inst pointer\");\n", ffi_fn_name));
     state.push_ffi("        unreachable!();\n");
@@ -1469,7 +1469,7 @@ fn generate_string_ffi_getter_setter<A: ToString, B: ToString, C: ToString>(stat
     state.push_ffi("}\n");
 
     //FFI STRING SETTER
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_set(inst: * mut {}, str: *const c_char) {{\n", state.ffi_prefix, state.ffi_accessor_prefix, ffi_fn_name, name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_set(inst: * mut {}, str: *const c_char) {{\n", state.ffi_prefix, state.ffi_accessor_prefix, ffi_fn_name, name));
     state.push_ffi("    if inst.is_null() {\n");
     state.push_ffi(format!("        ffi_abort(\"called {}_set with null inst pointer\");\n", ffi_fn_name));
     state.push_ffi("        unreachable!();\n");
@@ -1496,7 +1496,7 @@ fn generate_object_ffi_getter_setter<A: ToString,B: ToString,C: ToString,D: ToSt
     let ffi_fn_name = ffi_fn_name.to_string();
 
     //FFI getter
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_get(inst: *const {}) -> *mut {} {{\n", state.ffi_prefix, state.ffi_accessor_prefix, ffi_fn_name, struct_name, simple_type_name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_get(inst: *const {}) -> *mut {} {{\n", state.ffi_prefix, state.ffi_accessor_prefix, ffi_fn_name, struct_name, simple_type_name));
     state.push_ffi("    if inst.is_null() {\n");
     state.push_ffi(format!("        ffi_abort(\"called {}_get with null inst pointer\");\n", ffi_fn_name));
     state.push_ffi("        unreachable!();\n");
@@ -1509,7 +1509,7 @@ fn generate_object_ffi_getter_setter<A: ToString,B: ToString,C: ToString,D: ToSt
     state.push_ffi("}\n");
 
     //FFI setter
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_set(inst: *mut {}, value: *const {}) {{\n", state.ffi_prefix, state.ffi_accessor_prefix, ffi_fn_name, struct_name, simple_type_name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_set(inst: *mut {}, value: *const {}) {{\n", state.ffi_prefix, state.ffi_accessor_prefix, ffi_fn_name, struct_name, simple_type_name));
     state.push_ffi("    if inst.is_null() {\n");
     state.push_ffi(format!("        ffi_abort(\"called {}_set with null inst pointer\");\n", ffi_fn_name));
     state.push_ffi("        unreachable!();\n");
@@ -1525,7 +1525,7 @@ fn generate_simple_ffi_getter_setter<A: ToString,B: ToString,C: ToString,D: ToSt
     let ffi_fn_name = ffi_fn_name.to_string();
 
     //FFI getter
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_get(inst: *const {}, is_null: *mut bool) -> {} {{\n", state.ffi_prefix, state.ffi_accessor_prefix, ffi_fn_name, struct_name, simple_type_name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_get(inst: *const {}, is_null: *mut bool) -> {} {{\n", state.ffi_prefix, state.ffi_accessor_prefix, ffi_fn_name, struct_name, simple_type_name));
     state.push_ffi("    if inst.is_null() {\n");
     state.push_ffi(format!("        ffi_abort(\"called {}_get with null inst pointer\");\n", ffi_fn_name));
     state.push_ffi("        unreachable!();\n");
@@ -1538,7 +1538,7 @@ fn generate_simple_ffi_getter_setter<A: ToString,B: ToString,C: ToString,D: ToSt
     state.push_ffi("}\n");
 
     //FFI setter
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_set(inst: *mut {}, value: *const {}) {{\n", state.ffi_prefix, state.ffi_accessor_prefix, ffi_fn_name, struct_name, simple_type_name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_set(inst: *mut {}, value: *const {}) {{\n", state.ffi_prefix, state.ffi_accessor_prefix, ffi_fn_name, struct_name, simple_type_name));
     state.push_ffi("    if inst.is_null() {\n");
     state.push_ffi(format!("        ffi_abort(\"called {}_set with null inst pointer\");\n", ffi_fn_name));
     state.push_ffi("        unreachable!();\n");
@@ -1683,11 +1683,11 @@ fn generate_dump_model_array(state: &mut State, name: &str, _array: &JsonValue, 
     state.push("    }\n");
     state.push("}\n");
 
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_new() -> *mut {} {{\n", state.ffi_prefix, state.ffi_accessor_prefix, struct_name, struct_name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_new() -> *mut {} {{\n", state.ffi_prefix, state.ffi_accessor_prefix, struct_name, struct_name));
     state.push_ffi(format!("    Box::into_raw(Box::new({}::default()))\n", struct_name));
     state.push_ffi("}\n");
 
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_free(inst: *mut {}) {{\n", state.ffi_prefix, state.ffi_accessor_prefix, struct_name, struct_name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_free(inst: *mut {}) {{\n", state.ffi_prefix, state.ffi_accessor_prefix, struct_name, struct_name));
     state.push_ffi("    if inst.is_null() {\n");
     state.push_ffi("        ffi_abort(\"free(NULL)\");\n");
     state.push_ffi("        unreachable!()\n");
@@ -1697,7 +1697,7 @@ fn generate_dump_model_array(state: &mut State, name: &str, _array: &JsonValue, 
 
     generate_ffi_from_json(state, struct_name);
 
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_size(inst: *mut {}) -> usize {{\n", state.ffi_prefix, state.ffi_accessor_prefix, struct_name, struct_name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_size(inst: *mut {}) -> usize {{\n", state.ffi_prefix, state.ffi_accessor_prefix, struct_name, struct_name));
     state.push_ffi("    match inst.as_mut() {\n");
     state.push_ffi("        None => {\n");
     state.push_ffi("            ffi_abort(\"called with a null instance pointer\");\n");
@@ -1707,7 +1707,7 @@ fn generate_dump_model_array(state: &mut State, name: &str, _array: &JsonValue, 
     state.push_ffi("    }\n");
     state.push_ffi("}\n");
 
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_get(inst: *mut {}, idx: usize) -> *mut {} {{\n", state.ffi_prefix, state.ffi_accessor_prefix, struct_name, struct_name, referent_name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_get(inst: *mut {}, idx: usize) -> *mut {} {{\n", state.ffi_prefix, state.ffi_accessor_prefix, struct_name, struct_name, referent_name));
     state.push_ffi("    match inst.as_mut() {\n");
     state.push_ffi("        None => {\n");
     state.push_ffi("            ffi_abort(\"called with a null instance pointer\");\n");
@@ -1726,7 +1726,7 @@ fn generate_dump_model_array(state: &mut State, name: &str, _array: &JsonValue, 
     state.push_ffi("    }\n");
     state.push_ffi("}\n");
 
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_remove(inst: *mut {}, idx: usize) {{\n", state.ffi_prefix, state.ffi_accessor_prefix, struct_name, struct_name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_remove(inst: *mut {}, idx: usize) {{\n", state.ffi_prefix, state.ffi_accessor_prefix, struct_name, struct_name));
     state.push_ffi("    match inst.as_mut() {\n");
     state.push_ffi("        None => {\n");
     state.push_ffi("            ffi_abort(\"called with a null instance pointer\");\n");
@@ -1742,7 +1742,7 @@ fn generate_dump_model_array(state: &mut State, name: &str, _array: &JsonValue, 
     state.push_ffi("    }\n");
     state.push_ffi("}\n");
 
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_set(inst: *mut {}, idx: usize, value: *const {}) {{\n", state.ffi_prefix, state.ffi_accessor_prefix, struct_name, struct_name, referent_name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_set(inst: *mut {}, idx: usize, value: *const {}) {{\n", state.ffi_prefix, state.ffi_accessor_prefix, struct_name, struct_name, referent_name));
     state.push_ffi("    match inst.as_mut() {\n");
     state.push_ffi("        None => {\n");
     state.push_ffi("            ffi_abort(\"called with a null instance pointer\");\n");
@@ -1758,7 +1758,7 @@ fn generate_dump_model_array(state: &mut State, name: &str, _array: &JsonValue, 
     state.push_ffi("    }\n");
     state.push_ffi("}\n");
 
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_add(inst: *mut {}, value: *const {}) {{\n", state.ffi_prefix, state.ffi_accessor_prefix, struct_name, struct_name, referent_name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_add(inst: *mut {}, value: *const {}) {{\n", state.ffi_prefix, state.ffi_accessor_prefix, struct_name, struct_name, referent_name));
     state.push_ffi("    match inst.as_mut() {\n");
     state.push_ffi("        None => {\n");
     state.push_ffi("            ffi_abort(\"called with a null instance pointer\");\n");
@@ -1882,12 +1882,12 @@ fn generate_operation(state: &mut State, operation: &Operation) {
 
 
 
-    state.push_path("\n    #[cfg(feature = \"blocking\")]\n");
+    state.push_path("\n    #[cfg(feature = \"blocking\")]\n#[cfg(not(target_arch = \"wasm32\"))]\n");
     state.push_path(format!("    pub fn {}(&self", operation.function_name));
-    state.push_async_path("\n    #[cfg(feature = \"async\")]\n");
+    state.push_async_path("\n    #[cfg(any(feature = \"async\", target_arch = \"wasm32\"))]\n");
     state.push_async_path(format!("    pub async fn {}(&self", operation.async_function_name));
 
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}(api: *const ApiClient", state.ffi_prefix, state.ffi_op_prefix, operation.function_name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}(api: *const ApiClient", state.ffi_prefix, state.ffi_op_prefix, operation.function_name));
 
     for param_desc in &param {
         let param_name_raw = param_desc["name"].as_str();
@@ -2356,7 +2356,7 @@ fn generate_ffi_operation_response_body_getter<A: ToString, B: ToString, C: ToSt
     let body_name = body_name.to_string();
     if body_name == "OString" {
         //Handle text/plain case
-        state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_{}_body(inst: *const {}, buffer: *mut c_char, len: *mut usize) -> bool {{\n", state.ffi_prefix, state.ffi_accessor_prefix, response_name, enum_constant_name, response_name));
+        state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_{}_body(inst: *const {}, buffer: *mut c_char, len: *mut usize) -> bool {{\n", state.ffi_prefix, state.ffi_accessor_prefix, response_name, enum_constant_name, response_name));
         state.push_ffi("    if len.is_null() {\n");
         state.push_ffi("        ffi_abort(\"len null pointer\");\n");
         state.push_ffi("        unreachable!()\n");
@@ -2405,7 +2405,7 @@ fn generate_ffi_operation_response_body_getter<A: ToString, B: ToString, C: ToSt
         return;
     }
 
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_{}_body(inst: *const {}) -> *mut {} {{\n", state.ffi_prefix, state.ffi_accessor_prefix, response_name, enum_constant_name, response_name, body_name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_{}_body(inst: *const {}) -> *mut {} {{\n", state.ffi_prefix, state.ffi_accessor_prefix, response_name, enum_constant_name, response_name, body_name));
     state.push_ffi("    match inst.as_ref() {\n");
     state.push_ffi("        None => {\n");
     state.push_ffi("            ffi_abort(\"inst null pointer\");\n");
@@ -2431,7 +2431,7 @@ fn generate_ffi_operation_response_header_getter<A: ToString, B: ToString, C: To
     let enum_constant_name = enum_constant_name.to_string();
     let body_name = header_name.to_string();
 
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_{}_header(inst: *const {}) -> *mut {} {{\n", state.ffi_prefix, state.ffi_accessor_prefix, response_name, enum_constant_name, response_name, body_name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_{}_header(inst: *const {}) -> *mut {} {{\n", state.ffi_prefix, state.ffi_accessor_prefix, response_name, enum_constant_name, response_name, body_name));
     state.push_ffi("    match inst.as_ref() {\n");
     state.push_ffi("        None => {\n");
     state.push_ffi("            ffi_abort(\"inst null pointer\");\n");
@@ -2587,7 +2587,7 @@ fn generate_operation_response_enum(state: &mut State, operation: &Operation, re
 
 
     //FFI Enum wrapper
-    state.push_ffi("#[cfg(feature = \"ffi\")]\n");
+    state.push_ffi("#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n");
     state.push_ffi("#[repr(C)]\n");
     state.push_ffi("#[derive(Debug, Clone, PartialEq, Eq, Hash)]\n");
     state.push_ffi(format!("pub(crate) enum {}Type {{\n", operation.response_name));
@@ -2596,7 +2596,7 @@ fn generate_operation_response_enum(state: &mut State, operation: &Operation, re
     }
     state.push_ffi("}\n");
 
-    state.push_ffi(format!("\n#[cfg(feature = \"ffi\")]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_type(inst: *const {}) -> {}Type {{\n", state.ffi_prefix, state.ffi_accessor_prefix, operation.response_name, operation.response_name, operation.response_name));
+    state.push_ffi(format!("\n#[cfg(all(feature = \"ffi\", feature = \"blocking\"))]\n#[cfg(not(target_arch = \"wasm32\"))]\n#[no_mangle] pub(crate) unsafe extern \"C\" fn {}{}{}_type(inst: *const {}) -> {}Type {{\n", state.ffi_prefix, state.ffi_accessor_prefix, operation.response_name, operation.response_name, operation.response_name));
     state.push_ffi("    match inst.as_ref() {\n");
     state.push_ffi("        None => {\n");
     state.push_ffi(format!("            ffi_abort(\"{}{}{}_type was called with a inst null pointer\");\n", state.ffi_prefix, state.ffi_accessor_prefix, operation.response_name));
@@ -2680,9 +2680,9 @@ fn generate_paths(state: &mut State, _schema: &JsonValue) {
 
     state.push("\n#[derive(Debug)]\n");
     state.push("pub struct ApiClient {\n");
-    state.push("    #[cfg(feature = \"blocking\")]\n");
+    state.push("    #[cfg(feature = \"blocking\")]\n#[cfg(not(target_arch = \"wasm32\"))]\n");
     state.push("    pub client_blocking: reqwest::blocking::Client,\n");
-    state.push("    #[cfg(feature = \"async\")]\n");
+    state.push("    #[cfg(any(feature = \"async\", target_arch = \"wasm32\"))]\n");
     state.push("    pub client_async: reqwest::Client,\n");
     state.push("    pub base_url: String,\n");
     state.push("    request_customizer: Box<dyn RequestCustomizer>,\n");
@@ -2692,9 +2692,9 @@ fn generate_paths(state: &mut State, _schema: &JsonValue) {
     state.push("\nimpl Clone for ApiClient {\n");
     state.push("    fn clone(&self) -> Self {\n");
     state.push("        Self {\n");
-    state.push("            #[cfg(feature = \"blocking\")]\n");
+    state.push("            #[cfg(feature = \"blocking\")]\n#[cfg(not(target_arch = \"wasm32\"))]\n");
     state.push("            client_blocking: self.client_blocking.clone(),\n");
-    state.push("            #[cfg(feature = \"async\")]\n");
+    state.push("            #[cfg(any(feature = \"async\", target_arch = \"wasm32\"))]\n");
     state.push("            client_async: self.client_async.clone(),\n");
     state.push("            base_url: self.base_url.clone(),\n");
     state.push("            request_customizer: self.request_customizer.clone_to_box(),\n");
@@ -2706,6 +2706,7 @@ fn generate_paths(state: &mut State, _schema: &JsonValue) {
     state.push("\nimpl ApiClient {\n");
     state.push("\n    #[cfg(feature = \"blocking\")]\n");
     state.push("     #[cfg(not(feature = \"async\"))]\n");
+    state.push("     #[cfg(not(target_arch = \"wasm32\"))]\n");
     state.push("    pub fn new(client_blocking: reqwest::blocking::Client, base_url: &str) -> ApiClient {\n");
     state.push("        ApiClient {\n");
     state.push("            client_blocking: client_blocking,\n");
@@ -2714,7 +2715,7 @@ fn generate_paths(state: &mut State, _schema: &JsonValue) {
     state.push("            response_customizer: Box::new(DefaultCustomizer::default()),\n");
     state.push("        }\n");
     state.push("    }\n");
-    state.push("\n    #[cfg(feature = \"async\")]\n");
+    state.push("\n    #[cfg(any(feature = \"async\", target_arch = \"wasm32\"))]\n");
     state.push("     #[cfg(not(feature = \"blocking\"))]\n");
     state.push("    pub fn new(client_async: reqwest::Client, base_url: &str) -> ApiClient {\n");
     state.push("        ApiClient {\n");
@@ -2725,6 +2726,7 @@ fn generate_paths(state: &mut State, _schema: &JsonValue) {
     state.push("        }\n");
     state.push("    }\n");
     state.push("\n    #[cfg(feature = \"async\")]\n");
+    state.push("     #[cfg(not(target_arch = \"wasm32\"))]\n");
     state.push("     #[cfg(feature = \"blocking\")]\n");
     state.push("    pub fn new(client_blocking: reqwest::blocking::Client, client_async: reqwest::Client, base_url: &str) -> ApiClient {\n");
     state.push("        ApiClient {\n");
