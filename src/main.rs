@@ -138,7 +138,8 @@ enum Schema {
     FloatMap,
     BooleanMap,
     RefMap(String),
-    ImplMap(JsonValue)
+    ImplMap(JsonValue),
+    Constant(JsonValue),
 }
 
 impl Display for Schema {
@@ -177,6 +178,7 @@ impl Display for Schema {
             Schema::FloatMap => "FloatMap",
             Schema::CompositeAnyObjectImpl(_) => "CompositeAnyObjectImpl",
             Schema::CompositeOneObjectImpl(_) => "CompositeOneObjectImpl",
+            Schema::Constant(_) => "Constant",
         };
 
         f.write_str(name)
@@ -242,6 +244,10 @@ fn classify_schema(schema: &JsonValue) -> Schema {
         }
 
         return Schema::Invalid
+    }
+
+    if !schema["const"].is_null() {
+        return Schema::Constant(schema["const"].clone());
     }
 
 
@@ -780,6 +786,7 @@ fn sanitize_schemas(root: &mut JsonValue) {
                     for (idx, child) in implementation.members().enumerate() {
                         match classify_schema(child) {
                             Schema::Ref(_) => {}
+                            Schema::Constant(_) => {},
                             Schema::ObjectImpl(inner_impl) => {
                                 root["components"]["schemas"][name]["oneOf"][idx] = move_schema_implementation(&inner_impl, format!("Composite{}{}", name.to_upper_camel_case(), idx), root);
                             }
@@ -1146,6 +1153,10 @@ fn generate_one_object_model(state: &mut State, name: &str, object: &JsonValue) 
                 let ref_struct_name = state.struct_name_map.get(referent.as_str()).unwrap().clone();
                 state.push(format!("    {ref_struct_name}({ref_struct_name}),\n"));
             },
+            Schema::Constant(constant) => {
+                let const_name = "Const".to_string() + &constant.as_str().expect("Non String Constant").to_string().to_upper_camel_case();
+                state.push(format!("    {const_name},\n"));
+            }
             other => panic!("not implemented {other}"),
         }
     }
@@ -1165,6 +1176,11 @@ fn generate_one_object_model(state: &mut State, name: &str, object: &JsonValue) 
                 state.push(format!("        Self::{ref_struct_name}({ref_struct_name}::default())\n"));
                 break;
             },
+            Schema::Constant(constant) => {
+                let const_name = "Const".to_string() + &constant.as_str().expect("Non String Constant").to_string().to_upper_camel_case();
+                state.push(format!("        Self::{const_name}\n"));
+                break;
+            }
             other => panic!("not implemented {other}"),
         }
     }
@@ -1179,6 +1195,11 @@ fn generate_one_object_model(state: &mut State, name: &str, object: &JsonValue) 
             Schema::Ref(referent) => {
                 let ref_struct_name = state.struct_name_map.get(referent.as_str()).unwrap().clone();
                 state.push(format!("            {struct_name}::{ref_struct_name}(value) => value.into(),\n"));
+            }
+            Schema::Constant(constant) => {
+                let const_value = constant.as_str().expect("Non String Constant").to_string();
+                let const_name = "Const".to_string() + &const_value.to_upper_camel_case();
+                state.push(format!("            {struct_name}::{const_name} => JsonValue::String(\"{const_value}\".to_string()),\n"));
             }
             other => panic!("not implemented {other}"),
         }
@@ -1196,6 +1217,11 @@ fn generate_one_object_model(state: &mut State, name: &str, object: &JsonValue) 
                 let ref_struct_name = state.struct_name_map.get(referent.as_str()).unwrap().clone();
                 state.push(format!("            {struct_name}::{ref_struct_name}(value) => value.into(),\n"));
             }
+            Schema::Constant(constant) => {
+                let const_value = constant.as_str().expect("Non String Constant").to_string();
+                let const_name = "Const".to_string() + &const_value.to_upper_camel_case();
+                state.push(format!("            {struct_name}::{const_name} => JsonValue::String(\"{const_value}\".to_string()),\n"));
+            }
             other => panic!("not implemented {other}"),
         }
     }
@@ -1209,29 +1235,54 @@ fn generate_one_object_model(state: &mut State, name: &str, object: &JsonValue) 
     state.push("        if value.is_null() {\n");
     state.push("            return Err(\"Non null expected\".to_string());\n");
     state.push("        }\n");
+
+    let mut push_inner = |state: &mut State, idx: usize, schema_name: &str, schema: Schema| {
+        if matches!(schema, Schema::Constant(_)) {
+            return;
+        }
+
+        for (idx2, n2) in object["oneOf"].members().enumerate() {
+            if idx >= idx2 {
+                continue;
+            }
+
+            match classify_schema(n2) {
+                Schema::Ref(referent) => {
+                    let ref_struct_name2 = state.struct_name_map.get(&referent).unwrap().clone();
+                    state.push(format!("            if {ref_struct_name2}::try_from(value).is_ok() {{\n"));
+                    state.push(format!("                return Err(\"Both {schema_name} and {ref_struct_name2} match\".to_string())\n"));
+                    state.push("            }\n");
+                }
+                Schema::Constant(constant) => {
+                    let const_value = constant.as_str().expect("Non String Constant").to_string();
+                    let const_name = "Const".to_string() + &const_value.to_upper_camel_case();
+                    state.push(format!("            if value.as_str() == Some(\"{const_value}\") {{\n"));
+                    state.push(format!("                return Err(\"Both {schema_name} and {const_name} match\".to_string())\n"));
+                    state.push("            }\n");
+                }
+                other => panic!("not implemented {other}"),
+            }
+        }
+    };
+
     for (idx, n) in object["oneOf"].members().enumerate() {
         match classify_schema(n) {
             Schema::Ref(referent) => {
                 let ref_struct_name = state.struct_name_map.get(&referent).unwrap().clone();
                 state.push(format!("        let result = {ref_struct_name}::try_from(value);\n"));
                 state.push("        if let Ok(res) = result {\n");
-                for (idx2, n2) in object["oneOf"].members().enumerate() {
-                    if idx >= idx2 {
-                        continue;
-                    }
 
-                    match classify_schema(n2) {
-                        Schema::Ref(referent) => {
-                            let ref_struct_name2 = state.struct_name_map.get(&referent).unwrap().clone();
-                            state.push(format!("            if {ref_struct_name2}::try_from(value).is_ok() {{\n"));
-                            state.push(format!("                return Err(\"Both {ref_struct_name} and {ref_struct_name2} match\".to_string())\n"));
-                            state.push("            }\n");
-                        }
-                        other => panic!("not implemented {other}"),
-                    }
-                }
+                push_inner(state, idx, ref_struct_name.as_str(), classify_schema(n));
 
                 state.push(format!("            return Ok({struct_name}::{ref_struct_name}(res));\n"));
+                state.push("        }\n");
+            }
+            Schema::Constant(constant) => {
+                let const_value = constant.as_str().expect("Non String Constant").to_string();
+                let const_name = "Const".to_string() + &const_value.to_upper_camel_case();
+                state.push(format!("        if value.as_str() == Some(\"{const_value}\") {{\n"));
+                push_inner(state, idx, const_name.as_str(), classify_schema(n));
+                state.push(format!("            return Ok({struct_name}::{const_name});\n"));
                 state.push("        }\n");
             }
             other => panic!("not implemented {other}"),

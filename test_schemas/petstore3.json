@@ -205,6 +205,37 @@
           }
         ]
       },
+      "ColorEnum": {
+        "oneOf": [
+          {
+            "const": "RGB",
+            "title": "Red, Green, Blue",
+            "description": "Specify colors with the red, green, and blue additive color model"
+          },
+          {
+            "const": "CMYK",
+            "title": "Cyan, Magenta, Yellow, Black",
+            "description": "Specify colors with the cyan, magenta, yellow, and black subtractive color model"
+          }
+        ]
+      },
+      "WeirdEnum": {
+        "oneOf": [
+          {
+            "const": "RGB",
+            "title": "Red, Green, Blue",
+            "description": "Specify colors with the red, green, and blue additive color model"
+          },
+          {
+            "$ref": "#/components/schemas/BadPet"
+          },
+          {
+            "const": "CMYK",
+            "title": "Cyan, Magenta, Yellow, Black",
+            "description": "Specify colors with the cyan, magenta, yellow, and black subtractive color model"
+          }
+        ]
+      },
       "BadPet": {
         "oneOf": [
           {
