@@ -2594,11 +2594,11 @@ fn generate_operation(state: &mut State, operation: &Operation) {
                     }
                     Some("matrix") => {
                         if param_desc["explode"].as_bool().unwrap_or_default() {
-                            state.push_path(format!("            .add_path_param(\"{}\", {}.to_path_param_label_matrix_explode({raw_param_name}).unwrap_or(String::default()))\n", raw_param_name, param_name));
-                            state.push_async_path(format!("            .add_path_param(\"{}\", {}.to_path_param_label_matrix_explode({raw_param_name}).unwrap_or(String::default()))\n", raw_param_name, param_name));
+                            state.push_path(format!("            .add_path_param(\"{}\", {}.to_path_param_matrix_explode({raw_param_name}).unwrap_or(String::default()))\n", raw_param_name, param_name));
+                            state.push_async_path(format!("            .add_path_param(\"{}\", {}.to_path_param_matrix_explode({raw_param_name}).unwrap_or(String::default()))\n", raw_param_name, param_name));
                         } else {
-                            state.push_path(format!("            .add_path_param(\"{}\", {}.to_path_param_label_matrix({raw_param_name}).unwrap_or(String::default()))\n", raw_param_name, param_name));
-                            state.push_async_path(format!("            .add_path_param(\"{}\", {}.to_path_param_label_matrix({raw_param_name}).unwrap_or(String::default()))\n", raw_param_name, param_name));
+                            state.push_path(format!("            .add_path_param(\"{}\", {}.to_path_param_matrix({raw_param_name}).unwrap_or(String::default()))\n", raw_param_name, param_name));
+                            state.push_async_path(format!("            .add_path_param(\"{}\", {}.to_path_param_matrix({raw_param_name}).unwrap_or(String::default()))\n", raw_param_name, param_name));
                         }
                     }
                     Some(other) => panic!("unsupported param style {other}"),
