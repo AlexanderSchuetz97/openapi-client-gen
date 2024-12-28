@@ -57,13 +57,15 @@ macro_rules! option_wrapper {
             }
         }
 
-        impl From<&JsonValue> for $wrapper_name {
-            fn from(value: &JsonValue) -> Self {
+        impl TryFrom<&JsonValue> for $wrapper_name {
+            type Error = String;
+
+            fn try_from(value: &JsonValue) -> Result<Self, String> {
                 if value.is_null() {
-                    return Self(None)
+                    return Ok(Self(None))
                 }
 
-                Self(Some(<$inner_type>::from(value)))
+                Ok(Self(Some(<$inner_type>::try_from(value)?)))
             }
         }
 
@@ -93,6 +95,40 @@ macro_rules! option_wrapper {
                 Display::fmt(self.to_json_pretty().as_str(), f)
             }
         }
+
+        impl RequestBody<$inner_type> for $wrapper_name {
+            fn to_json_body(self) -> Option<ApiRequestEntity> {
+                if self.0.is_none() {
+                    return None;
+                }
+                Some(ApiRequestEntity::String(self.to_json()))
+            }
+
+            fn to_text_body(self) -> Option<ApiRequestEntity> {
+                if let Some(inner) = self.0 {
+                    return inner.to_text_body();
+                }
+
+                None
+            }
+        }
+
+        impl RequestBody<$inner_type> for &$wrapper_name {
+            fn to_json_body(self) -> Option<ApiRequestEntity> {
+                if self.0.is_none() {
+                    return None;
+                }
+                Some(ApiRequestEntity::String(self.to_json()))
+            }
+
+            fn to_text_body(self) -> Option<ApiRequestEntity> {
+                if let Some(inner) = self.0.as_ref() {
+                    return inner.to_text_body();
+                }
+
+                None
+            }
+        }
     };
 }
 
@@ -100,8 +136,11 @@ macro_rules! option_wrapper {
 macro_rules! numeric_type_conversions {
     ($api_type:ident, $rust_type:ty, $rust_array_type:ident, $rust_array_type_option:ident, $rust_map_type_option:ident, $rust_map_type:ident, $json_func:ident) => {
 
+        as_request_body!($api_type);
+
         #[derive(Debug, Clone, Hash, PartialEq, Eq, Default)]
         pub struct $rust_map_type(pub Map<$api_type>);
+        as_request_body!($rust_map_type);
 
         impl Deref for $rust_map_type {
             type Target = Map<$api_type>;
@@ -124,18 +163,21 @@ macro_rules! numeric_type_conversions {
             }
         }
 
-        impl From<&JsonValue> for $rust_map_type {
-            fn from(value: &JsonValue) -> Self {
+        impl TryFrom<&JsonValue> for $rust_map_type {
+
+            type Error = String;
+
+            fn try_from(value: &JsonValue) -> Result<Self, String> {
                 if !value.is_object() {
-                    return Self::default();
+                    return Err("Object expected".to_string());
                 }
 
                 let mut map = LinkedHashMap::new();
                 for (key, value) in value.entries() {
-                    map.insert(key.to_string(), value.into());
+                    map.insert(key.to_string(), value.try_into()?);
                 }
 
-                return Self(Map(map))
+                return Ok(Self(Map(map)))
             }
         }
 
@@ -166,6 +208,7 @@ macro_rules! numeric_type_conversions {
         #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
         pub struct $rust_array_type(pub Vec<$api_type>);
         option_wrapper!($rust_array_type_option, $rust_array_type);
+        as_request_body!($rust_array_type);
 
         impl Display for $rust_array_type {
             fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -188,18 +231,20 @@ macro_rules! numeric_type_conversions {
             }
         }
 
-        impl From<&JsonValue> for $rust_array_type {
-            fn from(value: &JsonValue) -> Self {
+        impl TryFrom<&JsonValue> for $rust_array_type {
+            type Error = String;
+
+            fn try_from(value: &JsonValue) -> Result<Self, String> {
                 if !value.is_array() {
-                    return Self(Vec::new())
+                    return Err("Array expected".to_string());
                 }
 
                 let mut array = Vec::with_capacity(value.len());
                 for x in value.members() {
-                    array.push(x.into());
+                    array.push(x.try_into()?);
                 }
 
-                return Self(array)
+                return Ok(Self(array))
             }
         }
 
@@ -269,9 +314,19 @@ macro_rules! numeric_type_conversions {
             }
         }
 
-        impl From<&JsonValue> for $api_type {
-            fn from(value: &JsonValue) -> Self {
-                Self(value.$json_func())
+        impl TryFrom<&JsonValue> for $api_type {
+            type Error = String;
+
+            fn try_from(value: &JsonValue) -> Result<Self, String> {
+                if value.is_null() {
+                    return Ok(Self(None));
+                }
+
+                if let Some(num) = value.$json_func() {
+                    return Ok(Self(Some(num)));
+                }
+
+                Err("Number expected".to_string())
             }
         }
 
@@ -301,6 +356,7 @@ macro_rules! numeric_type {
         #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Default)]
         pub struct $api_type(pub Option<$rust_type>);
 
+
         numeric_type_conversions!($api_type, $rust_type, $rust_array_type, $rust_array_type_option, $rust_map_type_option, $rust_map_type, $json_func);
     }
 }
@@ -326,6 +382,57 @@ macro_rules! fp_numeric_type {
         numeric_type_conversions!($api_type, $rust_type, $rust_array_type, $rust_array_type_option, $rust_map_type_option, $rust_map_type, $json_func);
     }
 }
+
+#[doc(hidden)]
+macro_rules! as_request_body {
+    ($typ:ty) => {
+        impl RequestBody<$typ> for $typ {
+            fn to_json_body(self) -> Option<ApiRequestEntity> {
+                Some(ApiRequestEntity::String(self.to_json()))
+            }
+
+            fn to_text_body(self) -> Option<ApiRequestEntity> {
+                None
+            }
+        }
+
+        impl RequestBody<$typ> for &$typ {
+            fn to_json_body(self) -> Option<ApiRequestEntity> {
+                Some(ApiRequestEntity::String(self.to_json()))
+            }
+
+            fn to_text_body(self) -> Option<ApiRequestEntity> {
+                None
+            }
+        }
+    }
+}
+
+pub trait RequestBody<T: Debug> {
+    fn to_json_body(self) -> Option<ApiRequestEntity>;
+
+    fn to_text_body(self) -> Option<ApiRequestEntity>;
+}
+
+impl RequestBody<String> for String {
+    fn to_json_body(self) -> Option<ApiRequestEntity> {
+        Some(ApiRequestEntity::String(JsonValue::String(self.clone()).to_string()))
+    }
+
+    fn to_text_body(self) -> Option<ApiRequestEntity> {
+        Some(ApiRequestEntity::String(self))
+    }
+}
+impl RequestBody<String> for &str {
+    fn to_json_body(self) -> Option<ApiRequestEntity> {
+        Some(ApiRequestEntity::String(JsonValue::String(self.to_string()).to_string()))
+    }
+
+    fn to_text_body(self) -> Option<ApiRequestEntity> {
+        Some(ApiRequestEntity::String(self.to_string()))
+    }
+}
+
 
 #[cfg(feature = "async")]
 #[cfg(not(target_arch = "wasm32"))]
@@ -354,7 +461,7 @@ fn get_tokio_runtime_or_error() -> io::Result<&'static tokio::runtime::Runtime> 
 
 #[cfg(all(feature = "ffi", feature = "blocking"))]
 #[cfg(not(target_arch = "wasm32"))]
-unsafe fn ffi_get_map_keys<T: for <'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display>
+unsafe fn ffi_get_map_keys<T: for <'a> TryFrom<&'a JsonValue, Error = String>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display>
         (any_map: &Map<T>, debug_ref: &str) -> *mut StringArray {
     let size = any_map.len();
     let mut keys = Vec::with_capacity(size);
@@ -1409,6 +1516,7 @@ impl Debug for Stream {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct StringMap(pub Map<OString>);
 option_wrapper!(OStringMap, StringMap);
+as_request_body!(StringMap);
 
 
 #[cfg(all(feature = "ffi", feature = "blocking"))]
@@ -1589,9 +1697,12 @@ impl DerefMut for StringMap {
     }
 }
 
-impl From<&JsonValue> for StringMap {
-    fn from(value: &JsonValue) -> Self {
-        Self(value.into())
+impl TryFrom<&JsonValue> for StringMap {
+
+    type Error = String;
+
+    fn try_from(value: &JsonValue) -> Result<Self, String> {
+        Ok(Self(value.try_into()?))
     }
 }
 
@@ -1611,8 +1722,8 @@ impl Into<JsonValue> for StringMap {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct BoolArray(pub Vec<OBool>);
-option_wrapper!(OBoolArray, StringArray);
-
+option_wrapper!(OBoolArray, BoolArray);
+as_request_body!(BoolArray);
 
 impl Deref for BoolArray {
     type Target = Vec<OBool>;
@@ -1628,13 +1739,14 @@ impl DerefMut for BoolArray {
     }
 }
 
-impl From<&JsonValue> for BoolArray {
-    fn from(value: &JsonValue) -> Self {
+impl TryFrom<&JsonValue> for BoolArray {
+    type Error = String;
+    fn try_from(value: &JsonValue) -> Result<Self, String> {
         match value {
             JsonValue::Array(ar) => {
-                BoolArray(ar.iter().map(|a| OBool(a.as_bool())).collect())
+                Ok(BoolArray(ar.iter().map(|a| OBool(a.as_bool())).collect()))
             }
-            _=> BoolArray::default()
+            _=> Err("Expected Boolean Array".to_string()),
         }
     }
 }
@@ -1784,6 +1896,7 @@ impl Into<JsonValue> for BoolArray {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct StringArray(pub Vec<OString>);
 option_wrapper!(OStringArray, StringArray);
+as_request_body!(StringArray);
 
 #[cfg(all(feature = "ffi", feature = "blocking"))]
 #[cfg(not(target_arch = "wasm32"))]
@@ -2241,14 +2354,18 @@ impl DerefMut for StringArray {
     }
 }
 
-impl From<&JsonValue> for StringArray {
-    fn from(value: &JsonValue) -> Self {
+impl TryFrom<&JsonValue> for StringArray {
+    type Error = String;
+    fn try_from(value: &JsonValue) -> Result<Self, String> {
+        if !value.is_array() {
+            return Err("StringArray expected".to_string());
+        }
         let mut array = Vec::with_capacity(value.len());
         for x in value.members() {
-            array.push(x.into());
+            array.push(x.try_into()?);
         }
 
-        return Self(array)
+        return Ok(Self(array))
     }
 }
 
@@ -2280,6 +2397,7 @@ impl Into<JsonValue> for StringArray {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AnyElement(JsonValue);
 option_wrapper!(OAnyElement, AnyElement);
+as_request_body!(AnyElement);
 
 impl Display for AnyElement {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -2304,16 +2422,18 @@ impl Hash for AnyElement {
     }
 }
 
-impl From<JsonValue> for AnyElement {
-    fn from(value: JsonValue) -> Self {
-        return AnyElement(value)
+impl TryFrom<JsonValue> for AnyElement {
+    type Error = String;
+    fn try_from(value: JsonValue) -> Result<Self, String> {
+        Ok(AnyElement(value))
     }
 }
 
 
-impl From<&JsonValue> for AnyElement {
-    fn from(value: &JsonValue) -> Self {
-        return AnyElement(value.clone())
+impl TryFrom<&JsonValue> for AnyElement {
+    type Error = String;
+    fn try_from(value: &JsonValue) -> Result<Self, String> {
+        Ok(AnyElement(value.clone()))
     }
 }
 
@@ -2542,8 +2662,7 @@ unsafe fn impl_any_element_type(inst: *const AnyElement) -> AnyElementType {
                     ffi_abort(format!("AnyElement_array_get index {} out of bounds for array size {}", idx, vec.len()));
                     unreachable!()
                 }
-
-                Box::into_raw(Box::new((&vec[idx]).into()))
+                Box::into_raw(Box::new(AnyElement((&vec[idx]).clone())))
             },
             _=> {
                 ffi_abort(format!("AnyElement_array_get was called with a instance pointer to a {:?}", impl_any_element_type(inst)));
@@ -2689,8 +2808,7 @@ unsafe fn impl_any_element_type(inst: *const AnyElement) -> AnyElementType {
                     ffi_abort(format!("AnyElement_object_get was called with key {} that does not exists", key));
                     unreachable!()
                 }
-
-                Box::into_raw(Box::new(value.unwrap().into()))
+                Box::into_raw(Box::new(AnyElement(value.unwrap().clone())))
             },
             _ => {
                 ffi_abort(format!("AnyElement_object_get was called with a instance pointer to a {:?}", impl_any_element_type(inst)));
@@ -2845,6 +2963,7 @@ unsafe fn impl_any_element_type(inst: *const AnyElement) -> AnyElementType {
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default)]
 pub struct AnyElementMap(pub Map<AnyElement>);
 option_wrapper!(OAnyElementMap, AnyElementMap);
+as_request_body!(AnyElementMap);
 
 impl Display for AnyElementMap {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -2855,7 +2974,7 @@ impl Display for AnyElementMap {
 #[cfg(all(feature = "ffi", feature = "blocking"))]
 #[cfg(not(target_arch = "wasm32"))]
 #[no_mangle] pub(crate) unsafe extern "C" fn AnyElementMap_new() -> *mut AnyElementMap {
-    return Box::into_raw(Box::new(AnyElementMap::default()))
+    Box::into_raw(Box::new(AnyElementMap::default()))
 }
 
 #[cfg(all(feature = "ffi", feature = "blocking"))]
@@ -2993,9 +3112,12 @@ impl DerefMut for AnyElementMap {
     }
 }
 
-impl From<&JsonValue> for AnyElementMap {
-    fn from(value: &JsonValue) -> Self {
-        return Self(value.into());
+impl TryFrom<&JsonValue> for AnyElementMap {
+
+    type Error = String;
+
+    fn try_from(value: &JsonValue) -> Result<Self, String> {
+        Ok(Self(value.try_into()?))
     }
 }
 
@@ -3015,6 +3137,7 @@ impl Into<JsonValue> for AnyElementMap {
 #[derive(Debug, Clone, Hash, Default, Eq, PartialEq)]
 pub struct AnyElementArray(Vec<AnyElement>);
 option_wrapper!(OAnyElementArray, AnyElementArray);
+as_request_body!(AnyElementArray);
 
 #[cfg(all(feature = "ffi", feature = "blocking"))]
 #[cfg(not(target_arch = "wasm32"))]
@@ -3139,14 +3262,20 @@ impl DerefMut for AnyElementArray {
     }
 }
 
-impl From<&JsonValue> for AnyElementArray {
-    fn from(value: &JsonValue) -> Self {
-        let mut array = Vec::with_capacity(value.len());
-        for x in value.members() {
-            array.push(x.into());
+impl TryFrom<&JsonValue> for AnyElementArray {
+
+    type Error = String;
+    fn try_from(value: &JsonValue) -> Result<Self, String> {
+        if !value.is_array() {
+            return Err("Expected AnyElementArray".to_string());
         }
 
-        return Self(array)
+        let mut array = Vec::with_capacity(value.len());
+        for x in value.members() {
+            array.push(x.try_into()?);
+        }
+
+        Ok(Self(array))
     }
 }
 
@@ -3164,9 +3293,9 @@ impl Into<JsonValue> for AnyElementArray {
 
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default)]
-pub struct Map<T: for <'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display>(pub LinkedHashMap<String, T>);
+pub struct Map<T: for <'a> TryFrom<&'a JsonValue, Error = String>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display>(pub LinkedHashMap<String, T>);
 
-impl<T: for <'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> Deref for Map<T> {
+impl<T: for <'a> TryFrom<&'a JsonValue, Error = String>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> Deref for Map<T> {
     type Target = LinkedHashMap<String, T>;
 
     fn deref(&self) -> &Self::Target {
@@ -3174,19 +3303,19 @@ impl<T: for <'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+
     }
 }
 
-impl<T: for <'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> DerefMut for Map<T> {
+impl<T: for <'a> TryFrom<&'a JsonValue, Error = String>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> DerefMut for Map<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl <T: for<'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> Display for Map<T> {
+impl <T: for<'a> TryFrom<&'a JsonValue, Error = String>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> Display for Map<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Display::fmt(self.to_json_pretty().as_str(), f)
     }
 }
 
-impl <T: for<'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> Into<JsonValue> for &Map<T> {
+impl <T: for<'a> TryFrom<&'a JsonValue, Error = String>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> Into<JsonValue> for &Map<T> {
     fn into(self) -> JsonValue {
 
         let mut new_obj = JsonValue::Object(Object::new());
@@ -3197,7 +3326,7 @@ impl <T: for<'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+
         return new_obj;
     }
 }
-impl <T: for<'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> Into<JsonValue> for Map<T> {
+impl <T: for<'a> TryFrom<&'a JsonValue, Error = String>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> Into<JsonValue> for Map<T> {
     fn into(self) -> JsonValue {
 
         let mut new_obj = JsonValue::Object(Object::new());
@@ -3208,23 +3337,27 @@ impl <T: for<'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+
         return new_obj;
     }
 }
-impl <T: for<'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> From<&JsonValue> for Map<T> {
-    fn from(value: &JsonValue) -> Self {
+impl <T: for<'a> TryFrom<&'a JsonValue, Error = String>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> TryFrom<&JsonValue> for Map<T> {
+    type Error = String;
+    fn try_from(value: &JsonValue) -> Result<Self, String> {
+        if !value.is_object() {
+            return Err("Expected Map".to_string());
+        }
+
         let mut m: LinkedHashMap<String, T> = LinkedHashMap::new();
 
         for (key, value) in value.entries() {
-            m.insert(key.to_string(), value.into());
+            m.insert(key.to_string(), value.try_into()?);
         }
 
-        return Map(m);
-
+        Ok(Map(m))
     }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default)]
-pub struct OMap<T: for <'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display>(Option<Map<T>>);
+pub struct OMap<T: for <'a> TryFrom<&'a JsonValue, Error = String>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display>(Option<Map<T>>);
 
-impl <T: for <'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> Deref for OMap<T> {
+impl <T: for <'a> TryFrom<&'a JsonValue, Error = String>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> Deref for OMap<T> {
     type Target = Option<Map<T>>;
 
     fn deref(&self) -> &Self::Target {
@@ -3232,19 +3365,19 @@ impl <T: for <'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq
     }
 }
 
-impl <T: for <'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> DerefMut for OMap<T> {
+impl <T: for <'a> TryFrom<&'a JsonValue, Error = String>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> DerefMut for OMap<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl <T: for<'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> Display for OMap<T> {
+impl <T: for<'a> TryFrom<&'a JsonValue, Error = String>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> Display for OMap<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Display::fmt(self.to_json_pretty().as_str(), f)
     }
 }
 
-impl <T: for<'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> Into<JsonValue> for &OMap<T> {
+impl <T: for<'a> TryFrom<&'a JsonValue, Error = String>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> Into<JsonValue> for &OMap<T> {
     fn into(self) -> JsonValue {
         if self.is_none() {
             return JsonValue::Null;
@@ -3253,7 +3386,7 @@ impl <T: for<'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+
         self.as_ref().unwrap().into()
     }
 }
-impl <T: for<'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> Into<JsonValue> for OMap<T> {
+impl <T: for<'a> TryFrom<&'a JsonValue, Error = String>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> Into<JsonValue> for OMap<T> {
     fn into(self) -> JsonValue {
         if self.is_none() {
             return JsonValue::Null;
@@ -3263,37 +3396,32 @@ impl <T: for<'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+
     }
 }
 
-impl <T: for<'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> From<Map<T>> for OMap<T> {
+impl <T: for<'a> TryFrom<&'a JsonValue, Error = String>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> From<Map<T>> for OMap<T> {
     fn from(value: Map<T>) -> Self {
         OMap(Some(value))
     }
 }
 
-impl <T: for<'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> From<&Map<T>> for OMap<T> {
+impl <T: for<'a> TryFrom<&'a JsonValue, Error = String>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> From<&Map<T>> for OMap<T> {
     fn from(value: &Map<T>) -> Self {
         OMap(Some(value.clone()))
     }
 }
 
-impl <T: for<'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> From<Option<Map<T>>> for OMap<T> {
+impl <T: for<'a> TryFrom<&'a JsonValue, Error = String>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> From<Option<Map<T>>> for OMap<T> {
     fn from(value: Option<Map<T>>) -> Self {
         OMap(value)
     }
 }
 
-impl <T: for<'a> From<&'a JsonValue>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> From<&JsonValue> for OMap<T> {
-    fn from(value: &JsonValue) -> Self {
-        if !value.is_object() {
-            return OMap(None);
+impl <T: for<'a> TryFrom<&'a JsonValue, Error = String>+Into<JsonValue>+Debug+Clone+Hash+PartialEq+Eq+Default+Display> TryFrom<&JsonValue> for OMap<T> {
+    type Error = String;
+    fn try_from(value: &JsonValue) -> Result<Self, String> {
+        if value.is_null() {
+            return Ok(OMap(None));
         }
 
-        let mut m: LinkedHashMap<String, T> = LinkedHashMap::new();
-        for (key, value) in value.entries() {
-            m.insert(key.to_string(), value.into());
-        }
-
-        return OMap(Some(Map(m)));
-
+        return Ok(OMap(Some(Map::try_from(value)?)));
     }
 }
 
@@ -3338,9 +3466,16 @@ impl From<Option<bool>> for OBool {
     }
 }
 
-impl From<&JsonValue> for OBool {
-    fn from(value: &JsonValue) -> Self {
-        Self(value.as_bool())
+impl TryFrom<&JsonValue> for OBool {
+    type Error = String;
+    fn try_from(value: &JsonValue) -> Result<Self, String> {
+        if let Some(val) = value.as_bool() {
+           return Ok(Self(Some(val)));
+        }
+        if value.is_null() {
+            return Ok(Self(None));
+        }
+        Err("Expected boolean".to_string())
     }
 }
 
@@ -3414,9 +3549,20 @@ impl From<&str> for OString {
     }
 }
 
-impl From<&JsonValue> for OString {
-    fn from(value: &JsonValue) -> Self {
-        Self(value.as_str().map(|s| s.to_string()))
+impl TryFrom<&JsonValue> for OString {
+
+    type Error = String;
+
+    fn try_from(value: &JsonValue) -> Result<Self, String> {
+        if value.is_null() {
+            return Ok(Self(None));
+        }
+
+        if let Some(str) = value.as_str() {
+            return Ok(Self(Some(str.to_string())));
+        }
+
+        Err("String expected".to_string())
     }
 }
 
@@ -4323,7 +4469,7 @@ fp_numeric_type!(OF64, f64, F64Array, OF64Array, OF64Map, F64Map, as_f64);
                 *is_null = false;
             }
 
-            return value.unwrap();
+            value.unwrap()
         }
     }
 }
@@ -6378,9 +6524,9 @@ pub trait ToJsonString : Sized {
     fn to_json_pretty(&self) -> String;
 }
 
-impl<T: for<'a> From<&'a JsonValue>+Sized> FromJsonString for T {
+impl<T: for<'a> TryFrom<&'a JsonValue, Error = String>+Sized> FromJsonString for T {
     fn from_json(str: &str) -> Result<Self, json::Error> {
-        Ok((&(json::parse(str)?)).into())
+        Ok(T::try_from(&(json::parse(str)?)).map_err(|e| json::Error::wrong_type(e.as_str()))?)
     }
 }
 
@@ -6467,6 +6613,7 @@ pub enum ApiError {
     InvalidRequestMethod(String, ApiRequestBuilder),
     ReqwestError(reqwest::Error),
     JsonError(json::Error, reqwest::Url, HeaderMap, StatusCode, HeaderMap, String),
+    UnexepectedJsonData(JsonValue, HeaderMap, StatusCode, HeaderMap, String),
     #[cfg(feature = "blocking")]
     #[cfg(not(target_arch = "wasm32"))]
     UnexpectedStatusCodeBlocking(reqwest::Url, HeaderMap, reqwest::blocking::Response),
@@ -6487,6 +6634,7 @@ pub enum ApiErrorType {
     ApiErrorInvalidRequestMethod,
     ApiErrorReqwestError,
     ApiErrorJsonError,
+    ApiErrorUnexpectedJsonData,
     ApiErrorUnexpectedStatusCode,
     ApiErrorUnexpectedContentType,
     ApiErrorOther,
@@ -6515,6 +6663,7 @@ pub enum ApiErrorType {
             ApiError::InvalidRequestMethod(_, _) => ApiErrorType::ApiErrorInvalidRequestMethod,
             ApiError::ReqwestError(_) => ApiErrorType::ApiErrorReqwestError,
             ApiError::JsonError(_, _, _, _, _, _) => ApiErrorType::ApiErrorJsonError,
+            ApiError::UnexepectedJsonData(_, _, _, _, _) => ApiErrorType::ApiErrorUnexpectedJsonData,
             ApiError::UnexpectedStatusCodeBlocking(_, _, _) => ApiErrorType::ApiErrorUnexpectedStatusCode,
             ApiError::UnexpectedContentTypeBlocking(_, _, _) => ApiErrorType::ApiErrorUnexpectedContentType,
             _ => ApiErrorType::ApiErrorOther,
@@ -7038,8 +7187,8 @@ impl ApiRequestBuilder {
         self
     }
 
-    pub fn entity_json<T: Into<JsonValue>>(mut self, entity: T) -> ApiRequestBuilder {
-        self.entity = Some(ApiRequestEntity::String(entity.into().to_string()));
+    pub fn entity_json<X: Debug, T: RequestBody<X>>(mut self, entity: T) -> ApiRequestBuilder {
+        self.entity = entity.to_json_body();
         self
     }
 

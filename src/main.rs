@@ -1,7 +1,7 @@
 #![warn(dead_code)]
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::fmt::{Display, Formatter};
+use std::fmt::{format, Display, Formatter};
 use std::fs::File;
 use std::io;
 use std::io::{Read, Write};
@@ -116,7 +116,9 @@ enum Schema {
     Any,
     Ref(String),
     PolymorphicBaseImpl(JsonValue),
-    CompositeObjectImpl(JsonValue),
+    CompositeAllObjectImpl(JsonValue),
+    CompositeAnyObjectImpl(JsonValue),
+    CompositeOneObjectImpl(JsonValue),
     ObjectImpl(JsonValue),
     RefArray(String),
     ImplArray(JsonValue),
@@ -149,7 +151,7 @@ impl Display for Schema {
             Schema::Any => "Any",
             Schema::Ref(_) => "Ref",
             Schema::PolymorphicBaseImpl(_) => "PolymorphicBaseImpl",
-            Schema::CompositeObjectImpl(_) => "CompositeObjectImpl",
+            Schema::CompositeAllObjectImpl(_) => "CompositeAllObjectImpl",
             Schema::ObjectImpl(_) => "ObjectImpl",
             Schema::RefArray(_) => "RefArray",
             Schema::ImplArray(_) => "ImplArray",
@@ -173,6 +175,8 @@ impl Display for Schema {
             Schema::ArrayMap(_) => "ArrayMap",
             Schema::FloatArray => "FloatArray",
             Schema::FloatMap => "FloatMap",
+            Schema::CompositeAnyObjectImpl(_) => "CompositeAnyObjectImpl",
+            Schema::CompositeOneObjectImpl(_) => "CompositeOneObjectImpl",
         };
 
         f.write_str(name)
@@ -218,7 +222,23 @@ fn classify_schema(schema: &JsonValue) -> Schema {
 
     if !schema["allOf"].is_null() {
         if schema["allOf"].is_array() {
-            return Schema::CompositeObjectImpl(schema["allOf"].clone());
+            return Schema::CompositeAllObjectImpl(schema["allOf"].clone());
+        }
+
+        return Schema::Invalid
+    }
+
+    if !schema["anyOf"].is_null() {
+        if schema["anyOf"].is_array() {
+            return Schema::CompositeAnyObjectImpl(schema["anyOf"].clone());
+        }
+
+        return Schema::Invalid
+    }
+
+    if !schema["oneOf"].is_null() {
+        if schema["oneOf"].is_array() {
+            return Schema::CompositeOneObjectImpl(schema["oneOf"].clone());
         }
 
         return Schema::Invalid
@@ -249,7 +269,9 @@ fn classify_schema(schema: &JsonValue) -> Schema {
                 Schema::Boolean => Schema::BooleanArray,
                 Schema::Any => Schema::AnyArray,
                 Schema::Ref(name) => Schema::RefArray(name),
-                Schema::CompositeObjectImpl(_) => Schema::ImplArray(schema["items"].clone()),
+                Schema::CompositeAllObjectImpl(_) => Schema::ImplArray(schema["items"].clone()),
+                Schema::CompositeAnyObjectImpl(_) => Schema::ImplArray(schema["items"].clone()),
+                Schema::CompositeOneObjectImpl(_) => Schema::ImplArray(schema["items"].clone()),
                 Schema::ObjectImpl(_) => Schema::ImplArray(schema["items"].clone()),
                 Schema::RefArray(_) => Schema::ImplArray(schema["items"].clone()),
                 Schema::ImplArray(_) => Schema::ImplArray(schema["items"].clone()),
@@ -638,7 +660,7 @@ fn sanitize_request_bodies(root: &mut JsonValue) {
                     Schema::StringArray | Schema::Int64Array | Schema::Int32Array | Schema::AnyArray |
                     Schema::AnyMap | Schema::StringMap | Schema::Int64Map | Schema::Int32Map
                     => {}
-                    Schema::CompositeObjectImpl(_) | Schema::ObjectImpl(_) | Schema::RefArray(_) | Schema::ImplArray(_) |  Schema::RefMap(_) | Schema::ImplMap(_)
+                    Schema::CompositeAllObjectImpl(_) | Schema::CompositeAnyObjectImpl(_) | Schema::CompositeOneObjectImpl(_) | Schema::ObjectImpl(_) | Schema::RefArray(_) | Schema::ImplArray(_) |  Schema::RefMap(_) | Schema::ImplMap(_)
                     => {
                         root["components"]["requestBodies"][name]["content"][content_type]["schema"] =
                             move_schema_implementation(&root["components"]["requestBodies"][name]["content"][content_type]["schema"].clone(),
@@ -701,7 +723,7 @@ fn sanitize_header(root: &mut JsonValue) {
                         _=> {}
                     }
                 }
-                Schema::ObjectImpl(_) | Schema::ImplArray(_) | Schema::RefArray(_) | Schema::CompositeObjectImpl(_) | Schema::RefMap(_) | Schema::ImplMap(_) => {
+                Schema::ObjectImpl(_) | Schema::ImplArray(_) | Schema::RefArray(_) | Schema::CompositeAllObjectImpl(_) | Schema::RefMap(_) | Schema::ImplMap(_) => {
                     root["components"]["headers"][name]["schema"] = move_schema_implementation(&root["components"]["headers"][name]["schema"].clone(), format!("ComplexResponseHeader{}", name.to_upper_camel_case()), root);
                 }
                 x=> panic!("#/compoments/headers/{} has unsupported type {}", name, x)
@@ -743,7 +765,29 @@ fn sanitize_schemas(root: &mut JsonValue) {
                     root["components"]["schemas"][name]["additionalProperties"] = JsonValue::Object(Object::new());
                     root["components"]["schemas"][name]["additionalProperties"]["$ref"] = JsonValue::String(format!("#/components/schemas/{}", item_name))
                 }
-                Schema::CompositeObjectImpl(implementation) => {
+                Schema::CompositeAnyObjectImpl(implementation) => {
+                    for (idx, child) in implementation.members().enumerate() {
+                        match classify_schema(child) {
+                            Schema::Ref(_) => {}
+                            Schema::ObjectImpl(inner_impl) => {
+                                root["components"]["schemas"][name]["anyOf"][idx] = move_schema_implementation(&inner_impl, format!("Composite{}{}", name.to_upper_camel_case(), idx), root);
+                            }
+                            other => panic!("Composite contains {other} which is not yet implemented raw: {}", implementation.to_string()),
+                        }
+                    }
+                }
+                Schema::CompositeOneObjectImpl(implementation) => {
+                    for (idx, child) in implementation.members().enumerate() {
+                        match classify_schema(child) {
+                            Schema::Ref(_) => {}
+                            Schema::ObjectImpl(inner_impl) => {
+                                root["components"]["schemas"][name]["oneOf"][idx] = move_schema_implementation(&inner_impl, format!("Composite{}{}", name.to_upper_camel_case(), idx), root);
+                            }
+                            other => panic!("Composite contains {other} which is not yet implemented raw: {}", implementation.to_string()),
+                        }
+                    }
+                }
+                Schema::CompositeAllObjectImpl(implementation) => {
                     let mut merged = JsonValue::Object(Object::new());
                     merged["type"] = "object".into();
                     merged["properties"] = JsonValue::Object(Object::new());
@@ -996,6 +1040,208 @@ fn collect_operations(state: &mut State, paths: &JsonValue) {
     state.operations.retain(|op| !to_remove.contains(&op.counter));
 }
 
+fn generate_any_object_model(state: &mut State, name: &str, object: &JsonValue) {
+    let struct_name_string = state.struct_name_map.get(name).unwrap().clone();
+    let struct_name = struct_name_string.as_str();
+
+    state.push("\n#[derive(Debug, Clone, Hash, PartialEq, Eq, Default)]\n");
+    state.push(format!("pub struct {} {{\n", struct_name));
+
+    for n in object["anyOf"].members() {
+        match classify_schema(n) {
+            Schema::Ref(referent) => {
+                let ref_struct_name = state.struct_name_map.get(referent.as_str()).unwrap().clone();
+                let field_name = referent.to_snake_case();
+                state.push(format!("    pub {field_name}: O{ref_struct_name},\n"));
+            },
+            other => panic!("not implemented {other}"),
+        }
+    }
+
+    state.push(format!("}}\n"));
+    state.push(format!("option_wrapper!(O{}, {});\n", struct_name, struct_name));
+    state.push(format!("as_request_body!({});\n", struct_name));
+
+    generate_ffi_from_json(state, struct_name);
+    generate_ffi_free_new(state, struct_name);
+
+    state.push(format!("\nimpl Into<JsonValue> for {} {{\n", struct_name));
+    state.push("    fn into(self) -> JsonValue {\n");
+    state.push("        let mut base = JsonValue::Object(Object::new());\n\n");
+    for n in object["anyOf"].members() {
+        match classify_schema(n) {
+            Schema::Ref(referent) => {
+                let field_name = referent.to_snake_case();
+                state.push(format!("        let current: JsonValue = self.{field_name}.into();\n"));
+                state.push("        for (name, value) in current.entries() {\n");
+                state.push("            base[name] = value.clone();\n");
+                state.push("        }\n\n");
+            }
+            other => panic!("not implemented {other}"),
+        }
+    }
+
+    state.push("        base\n");
+    state.push("    }\n");
+    state.push("}\n");
+
+    state.push(format!("\nimpl Into<JsonValue> for &{} {{\n", struct_name));
+    state.push("    fn into(self) -> JsonValue {\n");
+    state.push("        let mut base = JsonValue::Object(Object::new());\n\n");
+    for n in object["anyOf"].members() {
+        match classify_schema(n) {
+            Schema::Ref(referent) => {
+                let field_name = referent.to_snake_case();
+                state.push(format!("        let current: JsonValue = (&self.{field_name}).into();\n"));
+                state.push("        for (name, value) in current.entries() {\n");
+                state.push("            base[name] = value.clone();\n");
+                state.push("        }\n\n");
+            }
+            other => panic!("not implemented {other}"),
+        }
+    }
+
+    state.push("        base\n");
+    state.push("    }\n");
+    state.push("}\n");
+
+
+    //FROM &JsonValue
+    state.push(format!("\nimpl TryFrom<&JsonValue> for {} {{\n", struct_name));
+    state.push("    type Error = String;\n");
+    state.push("    fn try_from(value: &JsonValue) -> Result<Self, String> {\n");
+    state.push("        if value.is_null() {\n");
+    state.push("            return Err(\"Non null expected\".to_string());\n");
+    state.push("        }\n");
+    state.push("        let mut count = 0;\n");
+    state.push(format!("        let result = {} {{\n", struct_name));
+    for n in object["anyOf"].members() {
+        match classify_schema(n) {
+            Schema::Ref(referent) => {
+                let ref_struct_name = state.struct_name_map.get(&referent).unwrap().clone();
+                let field_name = referent.to_snake_case();
+                state.push(format!("            {field_name}: O{ref_struct_name}::try_from(value).inspect(|_| count += 1).unwrap_or_default(),\n"))
+            }
+            other => panic!("not implemented {other}"),
+        }
+    }
+    state.push(format!("        }};\n"));
+    state.push("        if count == 0 {\n");
+    state.push("            return Err(\"Invalid Schema\".to_string());\n");
+    state.push("        }\n");
+    state.push("        Ok(result)\n");
+    state.push(format!("    }}\n"));
+    state.push(format!("}}\n"));
+}
+fn generate_one_object_model(state: &mut State, name: &str, object: &JsonValue) {
+    let struct_name_string = state.struct_name_map.get(name).unwrap().clone();
+    let struct_name = struct_name_string.as_str();
+
+    state.push("\n#[derive(Debug, Clone, Hash, PartialEq, Eq)]\n");
+    state.push(format!("pub enum {} {{\n", struct_name));
+
+    for n in object["oneOf"].members() {
+        match classify_schema(n) {
+            Schema::Ref(referent) => {
+                let ref_struct_name = state.struct_name_map.get(referent.as_str()).unwrap().clone();
+                state.push(format!("    {ref_struct_name}({ref_struct_name}),\n"));
+            },
+            other => panic!("not implemented {other}"),
+        }
+    }
+    state.push(format!("}}\n"));
+    state.push(format!("option_wrapper!(O{}, {});\n", struct_name, struct_name));
+    state.push(format!("as_request_body!({});\n", struct_name));
+
+    generate_ffi_from_json(state, struct_name);
+    generate_ffi_free_new(state, struct_name);
+
+    state.push(format!("\nimpl Default for {} {{\n", struct_name));
+    state.push("    fn default() -> Self {\n");
+    for n in object["oneOf"].members() {
+        match classify_schema(n) {
+            Schema::Ref(referent) => {
+                let ref_struct_name = state.struct_name_map.get(referent.as_str()).unwrap().clone();
+                state.push(format!("        Self::{ref_struct_name}({ref_struct_name}::default())\n"));
+                break;
+            },
+            other => panic!("not implemented {other}"),
+        }
+    }
+    state.push("    }\n");
+    state.push("}\n");
+
+    state.push(format!("\nimpl Into<JsonValue> for {} {{\n", struct_name));
+    state.push("    fn into(self) -> JsonValue {\n");
+    state.push("        match self {\n");
+    for n in object["oneOf"].members() {
+        match classify_schema(n) {
+            Schema::Ref(referent) => {
+                let ref_struct_name = state.struct_name_map.get(referent.as_str()).unwrap().clone();
+                state.push(format!("            {struct_name}::{ref_struct_name}(value) => value.into(),\n"));
+            }
+            other => panic!("not implemented {other}"),
+        }
+    }
+    state.push("        }\n");
+    state.push("    }\n");
+    state.push("}\n");
+
+    state.push(format!("\nimpl Into<JsonValue> for &{} {{\n", struct_name));
+    state.push("    fn into(self) -> JsonValue {\n");
+    state.push("        match self {\n");
+    for n in object["oneOf"].members() {
+        match classify_schema(n) {
+            Schema::Ref(referent) => {
+                let ref_struct_name = state.struct_name_map.get(referent.as_str()).unwrap().clone();
+                state.push(format!("            {struct_name}::{ref_struct_name}(value) => value.into(),\n"));
+            }
+            other => panic!("not implemented {other}"),
+        }
+    }
+    state.push("        }\n");
+    state.push("    }\n");
+    state.push("}\n");
+
+    state.push(format!("\nimpl TryFrom<&JsonValue> for {} {{\n", struct_name));
+    state.push("    type Error = String;\n");
+    state.push("    fn try_from(value: &JsonValue) -> Result<Self, String> {\n");
+    state.push("        if value.is_null() {\n");
+    state.push("            return Err(\"Non null expected\".to_string());\n");
+    state.push("        }\n");
+    for (idx, n) in object["oneOf"].members().enumerate() {
+        match classify_schema(n) {
+            Schema::Ref(referent) => {
+                let ref_struct_name = state.struct_name_map.get(&referent).unwrap().clone();
+                state.push(format!("        let result = {ref_struct_name}::try_from(value);\n"));
+                state.push("        if let Ok(res) = result {\n");
+                for (idx2, n2) in object["oneOf"].members().enumerate() {
+                    if idx >= idx2 {
+                        continue;
+                    }
+
+                    match classify_schema(n2) {
+                        Schema::Ref(referent) => {
+                            let ref_struct_name2 = state.struct_name_map.get(&referent).unwrap().clone();
+                            state.push(format!("            if {ref_struct_name2}::try_from(value).is_ok() {{\n"));
+                            state.push(format!("                return Err(\"Both {ref_struct_name} and {ref_struct_name2} match\".to_string())\n"));
+                            state.push("            }\n");
+                        }
+                        other => panic!("not implemented {other}"),
+                    }
+                }
+
+                state.push(format!("            return Ok({struct_name}::{ref_struct_name}(res));\n"));
+                state.push("        }\n");
+            }
+            other => panic!("not implemented {other}"),
+        }
+    }
+    state.push("        Err(\"Invalid Schema\".to_string())\n");
+    state.push(format!("    }}\n"));
+    state.push(format!("}}\n"));
+}
+
 fn generate_model_object(state: &mut State, name: &str, object: &JsonValue) {
 
     //generate_option_wrapper(state, name);
@@ -1105,6 +1351,7 @@ fn generate_model_object(state: &mut State, name: &str, object: &JsonValue) {
     }
     state.push(format!("}}\n"));
     state.push(format!("option_wrapper!(O{}, {});\n", struct_name, struct_name));
+    state.push(format!("as_request_body!({});\n", struct_name));
 
     state.insert_ffi();
 
@@ -1115,83 +1362,96 @@ fn generate_model_object(state: &mut State, name: &str, object: &JsonValue) {
     state.push("}\n");
 
     //FROM &JsonValue
-    state.push(format!("\nimpl From<&JsonValue> for {} {{\n", struct_name));
-    state.push(format!("    fn from(value: &JsonValue) -> Self {{\n"));
-    state.push(format!("        {} {{\n", struct_name));
+    state.push(format!("\nimpl TryFrom<&JsonValue> for {} {{\n", struct_name));
+    state.push("    type Error = String;\n");
+    state.push("    fn try_from(value: &JsonValue) -> Result<Self, String> {\n");
+    state.push("        if !value.is_object() {\n");
+    state.push("            return Err(\"Object expected\".to_string());\n");
+    state.push("        }\n");
+    state.push("        for (prop_name,_) in value.entries() {\n");
+    state.push("            match prop_name {\n");
+    for (prop_name, _) in object["properties"].entries() {
+        state.push(format!("                \"{prop_name}\" => (),\n"));
+    }
+    state.push("                prop_name => return Err(format!(\"Unknown property {}\", prop_name))\n");
+    state.push("            }\n");
+    state.push("        }\n");
+    state.push(format!("        Ok({} {{\n", struct_name));
     for (prop_name, field_schema) in object["properties"].entries() {
         let field_name = field_name_map.get(prop_name).unwrap();
 
+
         match classify_schema(field_schema) {
             Schema::String => {
-                state.push(format!("            {}: OString::from(&value[\"{}\"]),\n", field_name, prop_name))
+                state.push(format!("            {field_name}: OString::try_from(&value[\"{prop_name}\"])?,\n"))
             }
             Schema::Int64 => {
-                state.push(format!("            {}: OI64::from(&value[\"{}\"]),\n", field_name, prop_name))
+                state.push(format!("            {field_name}: OI64::try_from(&value[\"{prop_name}\"])?,\n"))
             }
             Schema::Int32 => {
-                state.push(format!("            {}: OI32::from(&value[\"{}\"]),\n", field_name, prop_name))
+                state.push(format!("            {field_name}: OI32::try_from(&value[\"{prop_name}\"])?,\n"))
             }
             Schema::Any => {
                 //TODO make this faster
-                state.push(format!("            {}: OAnyElement(value.entries()\n", field_name));
-                state.push(format!("                    .filter(|(name, _value)| *name == \"{}\")\n", prop_name));
+                state.push(format!("            {field_name}: OAnyElement(value.entries()\n"));
+                state.push(format!("                    .filter(|(name, _value)| *name == \"{prop_name}\")\n"));
                 state.push("                    .map(|(_name, value)| value.clone().into())\n");
                 state.push("                    .into_iter()\n");
                 state.push("                    .next()),\n");
             }
             Schema::Ref(referent) => {
                 let referent = state.struct_name_map.get(&referent).unwrap().clone();
-                state.push(format!("            {}: O{}::from(&value[\"{}\"]),\n", field_name, referent, prop_name))
+                state.push(format!("            {field_name}: O{referent}::try_from(&value[\"{prop_name}\"])?,\n"))
             }
             Schema::RefMap(_referent) => {
-                state.push(format!("            {}: OMap::from(&value[\"{}\"]),\n", field_name, prop_name))
+                state.push(format!("            {field_name}: OMap::try_from(&value[\"{prop_name}\"])?,\n"))
             }
             Schema::StringArray => {
-                state.push(format!("            {}: OStringArray::from(&value[\"{}\"]),\n", field_name, prop_name))
+                state.push(format!("            {field_name}: OStringArray::try_from(&value[\"{prop_name}\"])?,\n"))
             }
             Schema::Int64Array => {
-                state.push(format!("            {}: OI64Array::from(&value[\"{}\"]),\n", field_name, prop_name))
+                state.push(format!("            {field_name}: OI64Array::try_from(&value[\"{prop_name}\"])?,\n"))
             }
             Schema::Int32Array => {
-                state.push(format!("            {}: OI32Array::from(&value[\"{}\"]),\n", field_name, prop_name))
+                state.push(format!("            {field_name}: OI32Array::try_from(&value[\"{prop_name}\"])?,\n"))
             }
             Schema::AnyArray => {
-                state.push(format!("            {}: OAnyElementArray::from(&value[\"{}\"]),\n", field_name, prop_name))
+                state.push(format!("            {field_name}: OAnyElementArray::try_from(&value[\"{prop_name}\"])?,\n"))
             }
             Schema::AnyMap => {
-                state.push(format!("            {}: OAnyElementMap::from(&value[\"{}\"]),\n", field_name, prop_name))
+                state.push(format!("            {field_name}: OAnyElementMap::try_from(&value[\"{prop_name}\"])?,\n"))
             }
             Schema::StringMap => {
-                state.push(format!("            {}: OStringMap::from(&value[\"{}\"]),\n", field_name, prop_name))
+                state.push(format!("            {field_name}: OStringMap::try_from(&value[\"{prop_name}\"])?,\n"))
             }
             Schema::Int64Map => {
-                state.push(format!("            {}: OI64Map::from(&value[\"{}\"]),\n", field_name, prop_name))
+                state.push(format!("            {field_name}: OI64Map::try_from(&value[\"{prop_name}\"])?,\n"))
             }
             Schema::Int32Map => {
-                state.push(format!("            {}: OI32Map::from(&value[\"{}\"]),\n", field_name, prop_name))
+                state.push(format!("            {field_name}: OI32Map::try_from(&value[\"{prop_name}\"])?,\n"))
             }
             Schema::Double => {
-                state.push(format!("            {}: OF64::from(&value[\"{}\"]),\n", field_name, prop_name))
+                state.push(format!("            {field_name}: OF64::try_from(&value[\"{prop_name}\"])?,\n"))
             }
             Schema::DoubleArray => {
-                state.push(format!("            {}: OF64Array::from(&value[\"{}\"]),\n", field_name, prop_name))
+                state.push(format!("            {field_name}: OF64Array::try_from(&value[\"{prop_name}\"])?,\n"))
             }
             Schema::DoubleMap => {
-                state.push(format!("            {}: OF64Map::from(&value[\"{}\"]),\n", field_name, prop_name))
+                state.push(format!("            {field_name}: OF64Map::try_from(&value[\"{prop_name}\"])?,\n"))
             }
             Schema::Boolean => {
-                state.push(format!("            {}: OBool::from(&value[\"{}\"]),\n", field_name, prop_name))
+                state.push(format!("            {field_name}: OBool::try_from(&value[\"{prop_name}\"])?,\n"))
             }
             Schema::BooleanMap => {
-                state.push(format!("            {}: OBoolMap::from(&value[\"{}\"]),\n", field_name, prop_name))
+                state.push(format!("            {field_name}: OBoolMap::try_from(&value[\"{prop_name}\"])?,\n"))
             }
             Schema::BooleanArray => {
-                state.push(format!("            {}: OBoolArray::from(&value[\"{}\"]),\n", field_name, prop_name))
+                state.push(format!("            {field_name}: OBoolArray::try_from(&value[\"{prop_name}\"])?,\n"))
             }
             x=> panic!("Invalid schema {} {}", prop_name, x),
         }
     }
-    state.push(format!("        }}\n"));
+    state.push(format!("        }})\n"));
     state.push(format!("    }}\n"));
     state.push(format!("}}\n"));
 
@@ -1644,6 +1904,7 @@ fn generate_dump_model_array(state: &mut State, name: &str, _array: &JsonValue, 
     state.push(format!("pub struct {}(", struct_name));
     state.push(format!("pub Vec<O{}>);\n", referent_name));
     state.push(format!("option_wrapper!(O{}, {});\n", struct_name, struct_name));
+    state.push(format!("as_request_body!({});\n", struct_name));
 
     state.push(format!("\nimpl Display for {} {{\n", struct_name));
     state.push("    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {\n");
@@ -1674,11 +1935,18 @@ fn generate_dump_model_array(state: &mut State, name: &str, _array: &JsonValue, 
     state.push(format!("    }}\n"));
     state.push(format!("}}\n"));
 
-    state.push(format!("impl From<&JsonValue> for {} {{\n", struct_name));
-    state.push("    fn from(value: &JsonValue) -> Self {\n".to_string());
+    state.push(format!("impl TryFrom<&JsonValue> for {} {{\n", struct_name));
+    state.push("    type Error = String;\n");
+    state.push("    fn try_from(value: &JsonValue) -> Result<Self, String> {\n".to_string());
     state.push("        match value {\n".to_string());
-    state.push("            JsonValue::Array(vec) => Self(vec.iter().map(|e| e.into()).collect()),\n".to_string());
-    state.push("            _ => Self::default(),".to_string());
+    state.push("            JsonValue::Array(vec) => {\n");
+    state.push("                let mut data = Vec::new();\n");
+    state.push("                for v in vec {\n");
+    state.push("                    data.push(v.try_into()?);\n");
+    state.push("                }\n");
+    state.push("                Ok(Self(data))\n");
+    state.push("            }\n");
+    state.push("            _ => Err(\"Array expected\".to_string()),".to_string());
     state.push("        }\n");
     state.push("    }\n");
     state.push("}\n");
@@ -1853,6 +2121,12 @@ fn generate_model(state: &mut State, schema: &JsonValue) {
             Schema::ObjectImpl(_) => {
                 generate_model_object(state, name, element);
             }
+            Schema::CompositeAnyObjectImpl(_) => {
+                generate_any_object_model(state, name, element);
+            }
+            Schema::CompositeOneObjectImpl(_) => {
+                generate_one_object_model(state, name, element);
+            }
             Schema::RefArray(referent) => {
                 generate_dump_model_array(state, name, element, referent);
             }
@@ -1927,10 +2201,10 @@ fn generate_operation(state: &mut State, operation: &Operation) {
                         match classify_schema(&content_type_ref["schema"]) {
                             Schema::Ref(ref_name) => {
                                 let ref_name = state.struct_name_map.get(ref_name.as_str()).unwrap().clone();
-                                state.push_path(format!(", request_body: &O{}", ref_name));
-                                state.push_async_path(format!(", request_body: &O{}", ref_name));
+                                state.push_path(format!(", request_body: impl RequestBody<{}>", ref_name));
+                                state.push_async_path(format!(", request_body: impl RequestBody<{}>", ref_name));
                                 state.push_ffi(format!(", request_body: *const {}", ref_name));
-                                json_entity = Some("request_body.as_ref()");
+                                json_entity = Some("request_body");
                             }
                             _=> panic!("{} request body type not supported for yet application/json", operation.name),
                         }
@@ -2250,10 +2524,9 @@ fn generate_operation(state: &mut State, operation: &Operation) {
                     "application/json" => {
                         state.push_path("                    let text = response.text()?;\n");
                         state.push_path("                    let json = json::parse(text.as_str());\n");
-                        state.push_path("                    if json.is_err() {\n");
-                        state.push_path("                        Err(ApiError::JsonError(json.unwrap_err(), request_url, request_headers, status, response_headers, text))\n");
-                        state.push_path("                    } else {\n");
-                        state.push_path(format!("                        Ok({}::{}((&json.unwrap()).into()", operation.response_name.as_str(), enum_type));
+                        state.push_path("                    match json {\n");
+                        state.push_path("                        Err(json_err) => Err(ApiError::JsonError(json_err, request_url, request_headers, status, response_headers, text)),\n");
+                        state.push_path(format!("                        Ok(json) => Ok({}::{}((&json).try_into().map_err(|e| ApiError::UnexepectedJsonData(json, request_headers, status, response_headers, e))?", operation.response_name.as_str(), enum_type));
                         if elem["headers"].is_object() {
                             state.push_path(", response_headers.into()");
                         }
@@ -2265,7 +2538,8 @@ fn generate_operation(state: &mut State, operation: &Operation) {
                         state.push_async_path("                    if json.is_err() {\n");
                         state.push_async_path("                        Err(ApiError::JsonError(json.unwrap_err(), request_url, request_headers, status, response_headers, text))\n");
                         state.push_async_path("                    } else {\n");
-                        state.push_async_path(format!("                        Ok({}::{}((&json.unwrap()).into()", operation.response_name.as_str(), enum_type));
+                        state.push_async_path("                        let json = json.unwrap();\n");
+                        state.push_async_path(format!("                        Ok({}::{}((&json).try_into().map_err(|e| ApiError::UnexepectedJsonData(json, request_headers, status, response_headers, e))?", operation.response_name.as_str(), enum_type));
                         if elem["headers"].is_object() {
                             state.push_async_path(", response_headers.into()");
                         }
@@ -2635,7 +2909,6 @@ fn generate_operation_response_header(state: &mut State, operation: &Operation, 
 
         let hdr_name = format!("{}{}Header", operation.response_name, code.to_uppercase());
         generate_ffi_free_new(state, &hdr_name);
-
 
         state.push("\n#[derive(Debug, Clone, Default)]\n");
         state.push(format!("pub struct {} {{\n", &hdr_name));
