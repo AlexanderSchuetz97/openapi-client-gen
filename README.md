@@ -79,7 +79,6 @@ You can compile the library shared object itself just fine with the stable toolc
 
 # Not implemented yet
 - Multiple OpenApi source files
-- Polymorphism
 - Some rarely used "re-usable" objects in OpenApi (if you generate the schema from server-code it will NEVER have this)
 - XML (any xml endpoint will just yield a Stream/Vec<u8> which you can manually process)
 - YAML OpenApi specs (Only JSON is implemented, which should be good enough since tools exist to convert YAML to JSON)
@@ -111,6 +110,6 @@ You can compile the library shared object itself just fine with the stable toolc
     This is intentional as I have no idea how your application will come by the base url and what kind of interceptors it will
     want to perhaps add authentication headers to every request. Please implement it yourself in for example lib.rs and export it.
 - Formatting like rustfmt
-  - You can literally just run rustfmt output .rs after invoking this program if you want.
+  - You can literally just run rustfmt on the output .rs after invoking this program if you want.
   - The formatting done in the output of this program does not match rustfmt. Its only purpose is to assist in verifying the correctness of the output.
   - In all actual uses run rustfmt manually on the output .rs file.

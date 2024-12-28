@@ -210,6 +210,7 @@ macro_rules! numeric_type_conversions {
         option_wrapper!($rust_array_type_option, $rust_array_type);
         as_request_body!($rust_array_type);
 
+
         impl Display for $rust_array_type {
             fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
                 Display::fmt(self.to_json_pretty().as_str(), f)
@@ -347,6 +348,110 @@ macro_rules! numeric_type_conversions {
                 }
             }
         }
+
+        impl PathParam<$rust_type> for $rust_type {
+            fn to_path_param_simple(self) -> Option<String> {
+                Some(self.to_string())
+            }
+
+            fn to_path_param_simple_explode(self) -> Option<String> {
+                self.to_path_param_simple()
+            }
+
+            fn to_path_param_label(self) -> Option<String> {
+                Some(format!(".{self}"))
+            }
+
+            fn to_path_param_label_explode(self) -> Option<String> {
+                Some(format!(".{self}"))
+            }
+
+            fn to_path_param_matrix(self, name: &str) -> Option<String> {
+                Some(format!(";{name}={self}"))
+            }
+
+            fn to_path_param_matrix_explode(self, name: &str) -> Option<String> {
+                Some(format!(";{name}={self}"))
+            }
+        }
+
+        impl PathParam<$rust_type> for &$rust_type {
+            fn to_path_param_simple(self) -> Option<String> {
+                Some(self.to_string())
+            }
+
+            fn to_path_param_simple_explode(self) -> Option<String> {
+                self.to_path_param_simple()
+            }
+
+            fn to_path_param_label(self) -> Option<String> {
+                Some(format!(".{self}"))
+            }
+
+            fn to_path_param_label_explode(self) -> Option<String> {
+                Some(format!(".{self}"))
+            }
+
+            fn to_path_param_matrix(self, name: &str) -> Option<String> {
+                Some(format!(";{name}={self}"))
+            }
+
+            fn to_path_param_matrix_explode(self, name: &str) -> Option<String> {
+                Some(format!(";{name}={self}"))
+            }
+        }
+
+        impl PathParam<$rust_type> for $api_type {
+            fn to_path_param_simple(self) -> Option<String> {
+                Some(self.0?.to_string())
+            }
+
+            fn to_path_param_simple_explode(self) -> Option<String> {
+                self.to_path_param_simple()
+            }
+
+            fn to_path_param_label(self) -> Option<String> {
+                Some(format!(".{self}"))
+            }
+
+            fn to_path_param_label_explode(self) -> Option<String> {
+                Some(format!(".{self}"))
+            }
+
+            fn to_path_param_matrix(self, name: &str) -> Option<String> {
+                Some(format!(";{name}={self}"))
+            }
+
+            fn to_path_param_matrix_explode(self, name: &str) -> Option<String> {
+                Some(format!(";{name}={self}"))
+            }
+        }
+
+        impl PathParam<$rust_type> for &$api_type {
+            fn to_path_param_simple(self) -> Option<String> {
+                Some(self.0?.to_string())
+            }
+
+            fn to_path_param_simple_explode(self) -> Option<String> {
+                self.to_path_param_simple()
+            }
+
+            fn to_path_param_label(self) -> Option<String> {
+                Some(format!(".{self}"))
+            }
+
+            fn to_path_param_label_explode(self) -> Option<String> {
+                Some(format!(".{self}"))
+            }
+
+            fn to_path_param_matrix(self, name: &str) -> Option<String> {
+                Some(format!(";{name}={self}"))
+            }
+
+            fn to_path_param_matrix_explode(self, name: &str) -> Option<String> {
+                Some(format!(";{name}={self}"))
+            }
+        }
     };
 }
 
@@ -414,6 +519,7 @@ pub trait RequestBody<T: Debug> {
     fn to_text_body(self) -> Option<ApiRequestEntity>;
 }
 
+
 impl RequestBody<String> for String {
     fn to_json_body(self) -> Option<ApiRequestEntity> {
         Some(ApiRequestEntity::String(JsonValue::String(self.clone()).to_string()))
@@ -433,6 +539,71 @@ impl RequestBody<String> for &str {
     }
 }
 
+
+pub trait PathParam<T: Debug> {
+    fn to_path_param_simple(self) -> Option<String>;
+
+    fn to_path_param_simple_explode(self) -> Option<String>;
+
+    fn to_path_param_label(self) -> Option<String>;
+
+    fn to_path_param_label_explode(self) -> Option<String>;
+
+    fn to_path_param_matrix(self, name: &str) -> Option<String>;
+
+    fn to_path_param_matrix_explode(self, name: &str) -> Option<String>;
+}
+
+impl PathParam<String> for String {
+    fn to_path_param_simple(self) -> Option<String> {
+        Some(self)
+    }
+    fn to_path_param_simple_explode(self) -> Option<String> {
+        Some(self)
+    }
+
+    fn to_path_param_label(self) -> Option<String> {
+        Some(format!(".{self}"))
+    }
+
+    fn to_path_param_label_explode(self) -> Option<String> {
+        Some(format!(".{self}"))
+    }
+
+    fn to_path_param_matrix(self, name: &str) -> Option<String> {
+        Some(format!(";{name}={self}"))
+    }
+
+    fn to_path_param_matrix_explode(self, name: &str) -> Option<String> {
+        Some(format!(";{name}={self}"))
+    }
+}
+
+impl PathParam<String> for &str {
+    fn to_path_param_simple(self) -> Option<String> {
+        Some(self.to_string())
+    }
+
+    fn to_path_param_simple_explode(self) -> Option<String> {
+        Some(self.to_string())
+    }
+
+    fn to_path_param_label(self) -> Option<String> {
+        Some(format!(".{self}"))
+    }
+
+    fn to_path_param_label_explode(self) -> Option<String> {
+        Some(format!(".{self}"))
+    }
+
+    fn to_path_param_matrix(self, name: &str) -> Option<String> {
+        Some(format!(";{name}={self}"))
+    }
+
+    fn to_path_param_matrix_explode(self, name: &str) -> Option<String> {
+        Some(format!(";{name}={self}"))
+    }
+}
 
 #[cfg(feature = "async")]
 #[cfg(not(target_arch = "wasm32"))]
@@ -1724,6 +1895,7 @@ impl Into<JsonValue> for StringMap {
 pub struct BoolArray(pub Vec<OBool>);
 option_wrapper!(OBoolArray, BoolArray);
 as_request_body!(BoolArray);
+
 
 impl Deref for BoolArray {
     type Target = Vec<OBool>;
@@ -3428,6 +3600,215 @@ impl <T: for<'a> TryFrom<&'a JsonValue, Error = String>+Into<JsonValue>+Debug+Cl
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default)]
 pub struct OBool(pub Option<bool>);
 
+impl RequestBody<bool> for OBool {
+    fn to_json_body(self) -> Option<ApiRequestEntity> {
+        Some(ApiRequestEntity::String(JsonValue::Boolean(self.0?).to_string()))
+    }
+
+    fn to_text_body(self) -> Option<ApiRequestEntity> {
+        if self.0? {
+            Some(ApiRequestEntity::String("true".to_string()))
+        } else {
+            Some(ApiRequestEntity::String("false".to_string()))
+        }
+    }
+}
+
+impl RequestBody<bool> for &OBool {
+    fn to_json_body(self) -> Option<ApiRequestEntity> {
+        Some(ApiRequestEntity::String(JsonValue::Boolean(self.0?).to_string()))
+    }
+
+    fn to_text_body(self) -> Option<ApiRequestEntity> {
+        if self.0? {
+            Some(ApiRequestEntity::String("true".to_string()))
+        } else {
+            Some(ApiRequestEntity::String("false".to_string()))
+        }
+    }
+}
+
+impl RequestBody<bool> for bool {
+    fn to_json_body(self) -> Option<ApiRequestEntity> {
+        Some(ApiRequestEntity::String(JsonValue::Boolean(self).to_string()))
+    }
+
+    fn to_text_body(self) -> Option<ApiRequestEntity> {
+        if self {
+            Some(ApiRequestEntity::String("true".to_string()))
+        } else {
+            Some(ApiRequestEntity::String("false".to_string()))
+        }
+    }
+}
+
+impl RequestBody<bool> for &bool {
+    fn to_json_body(self) -> Option<ApiRequestEntity> {
+        Some(ApiRequestEntity::String(JsonValue::Boolean(*self).to_string()))
+    }
+
+    fn to_text_body(self) -> Option<ApiRequestEntity> {
+        if *self {
+            Some(ApiRequestEntity::String("true".to_string()))
+        } else {
+            Some(ApiRequestEntity::String("false".to_string()))
+        }
+    }
+}
+
+impl PathParam<bool> for OBool {
+    fn to_path_param_simple(self) -> Option<String> {
+        if self.0? {
+            Some("true".to_string())
+        } else {
+            Some("false".to_string())
+        }
+    }
+
+    fn to_path_param_simple_explode(self) -> Option<String> {
+        self.to_path_param_simple()
+    }
+
+    fn to_path_param_label(self) -> Option<String> {
+        if self.0? {
+            Some(".true".to_string())
+        } else {
+            Some(".false".to_string())
+        }
+    }
+
+    fn to_path_param_label_explode(self) -> Option<String> {
+        self.to_path_param_label()
+    }
+
+    fn to_path_param_matrix(self, name: &str) -> Option<String> {
+        if self.0? {
+            Some(format!(";{name}=true"))
+        } else {
+            Some(format!(";{name}=false"))
+        }
+    }
+
+    fn to_path_param_matrix_explode(self, name: &str) -> Option<String> {
+        self.to_path_param_matrix(name)
+    }
+}
+
+impl PathParam<bool> for &OBool {
+    fn to_path_param_simple(self) -> Option<String> {
+        if self.0? {
+            Some("true".to_string())
+        } else {
+            Some("false".to_string())
+        }
+    }
+
+    fn to_path_param_simple_explode(self) -> Option<String> {
+        self.to_path_param_simple()
+    }
+
+    fn to_path_param_label(self) -> Option<String> {
+        if self.0? {
+            Some(".true".to_string())
+        } else {
+            Some(".false".to_string())
+        }
+    }
+
+    fn to_path_param_label_explode(self) -> Option<String> {
+        self.to_path_param_label()
+    }
+
+    fn to_path_param_matrix(self, name: &str) -> Option<String> {
+        if self.0? {
+            Some(format!(";{name}=true"))
+        } else {
+            Some(format!(";{name}=false"))
+        }
+    }
+
+    fn to_path_param_matrix_explode(self, name: &str) -> Option<String> {
+        self.to_path_param_matrix(name)
+    }
+}
+
+impl PathParam<bool> for bool {
+    fn to_path_param_simple(self) -> Option<String> {
+        if self {
+            Some("true".to_string())
+        } else {
+            Some("false".to_string())
+        }
+    }
+
+    fn to_path_param_simple_explode(self) -> Option<String> {
+        self.to_path_param_simple()
+    }
+
+    fn to_path_param_label(self) -> Option<String> {
+        if self {
+            Some(".true".to_string())
+        } else {
+            Some(".false".to_string())
+        }
+    }
+
+    fn to_path_param_label_explode(self) -> Option<String> {
+        self.to_path_param_label()
+    }
+
+    fn to_path_param_matrix(self, name: &str) -> Option<String> {
+        if self {
+            Some(format!(";{name}=true"))
+        } else {
+            Some(format!(";{name}=false"))
+        }
+    }
+
+    fn to_path_param_matrix_explode(self, name: &str) -> Option<String> {
+        self.to_path_param_matrix(name)
+    }
+}
+
+impl PathParam<bool> for &bool {
+    fn to_path_param_simple(self) -> Option<String> {
+        if *self {
+            Some("true".to_string())
+        } else {
+            Some("false".to_string())
+        }
+    }
+
+    fn to_path_param_simple_explode(self) -> Option<String> {
+        self.to_path_param_simple()
+    }
+
+    fn to_path_param_label(self) -> Option<String> {
+        if *self {
+            Some(".true".to_string())
+        } else {
+            Some(".false".to_string())
+        }
+    }
+
+    fn to_path_param_label_explode(self) -> Option<String> {
+        self.to_path_param_label()
+    }
+
+    fn to_path_param_matrix(self, name: &str) -> Option<String> {
+        if *self {
+            Some(format!(";{name}=true"))
+        } else {
+            Some(format!(";{name}=false"))
+        }
+    }
+
+    fn to_path_param_matrix_explode(self, name: &str) -> Option<String> {
+        self.to_path_param_matrix(name)
+    }
+}
+
+
 impl Deref for OBool {
     type Target = Option<bool>;
 
@@ -3499,6 +3880,49 @@ impl Into<JsonValue> for &OBool {
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Ord, PartialOrd)]
 pub struct OString(pub Option<String>);
+
+impl RequestBody<String> for OString {
+
+    fn to_json_body(self) -> Option<ApiRequestEntity> {
+        if self.0.is_none() {
+            return None;
+        }
+        Some(ApiRequestEntity::String(self.to_json()))
+    }
+
+    fn to_text_body(self) -> Option<ApiRequestEntity> {
+        if self.0.is_none() {
+            return None;
+        }
+        Some(ApiRequestEntity::String(self.0.unwrap()))
+    }
+}
+
+impl PathParam<String> for OString {
+    fn to_path_param_simple(self) -> Option<String> {
+        Some(format!("{}", &self.0?))
+    }
+
+    fn to_path_param_simple_explode(self) -> Option<String> {
+        self.to_path_param_simple()
+    }
+
+    fn to_path_param_label(self) -> Option<String> {
+        Some(format!(".{}", &self.0?))
+    }
+
+    fn to_path_param_label_explode(self) -> Option<String> {
+        Some(format!(".{}", &self.0?))
+    }
+
+    fn to_path_param_matrix(self, name: &str) -> Option<String> {
+        Some(format!(";{name}={}", &self.0?))
+    }
+
+    fn to_path_param_matrix_explode(self, name: &str) -> Option<String> {
+        Some(format!(";{name}={}", &self.0?))
+    }
+}
 
 impl Display for OString {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {

@@ -1,7 +1,7 @@
 #![warn(dead_code)]
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::fmt::{format, Display, Formatter};
+use std::fmt::{Display, Formatter};
 use std::fs::File;
 use std::io;
 use std::io::{Read, Write};
@@ -47,22 +47,14 @@ impl Operation {
     }
 }
 
-//TODO IMPLEMENT ALL OF THIS SAD STUFF
-#[derive(Debug)]
-struct PolymorphicInfo {
-    pub parent_type: String,
-    pub child_types: HashMap<String, String>,
-    pub discriminator: String,
-}
-
 #[derive(Debug, Default)]
 struct State {
     ffi_op_prefix: String,
     ffi_accessor_prefix: String,
     struct_name_prefix: String,
     ffi_prefix: String,
-    polymorphic_info: HashMap<String, PolymorphicInfo>,
     struct_name_map: HashMap<String, String>,
+    poly_map: HashMap<String, HashSet<String>>,
     map_types: Vec<String>,
     operations: Vec<Operation>,
     main_buffer: Vec<u8>,
@@ -115,7 +107,7 @@ enum Schema {
     Boolean,
     Any,
     Ref(String),
-    PolymorphicBaseImpl(JsonValue),
+    PolymorphicObjectImpl(JsonValue),
     CompositeAllObjectImpl(JsonValue),
     CompositeAnyObjectImpl(JsonValue),
     CompositeOneObjectImpl(JsonValue),
@@ -151,7 +143,7 @@ impl Display for Schema {
             Schema::Int32 => "Int32",
             Schema::Any => "Any",
             Schema::Ref(_) => "Ref",
-            Schema::PolymorphicBaseImpl(_) => "PolymorphicBaseImpl",
+            Schema::PolymorphicObjectImpl(_) => "PolymorphicObjectImpl",
             Schema::CompositeAllObjectImpl(_) => "CompositeAllObjectImpl",
             Schema::ObjectImpl(_) => "ObjectImpl",
             Schema::RefArray(_) => "RefArray",
@@ -301,7 +293,7 @@ fn classify_schema(schema: &JsonValue) -> Schema {
         Some("object") => {
             if schema["properties"].is_object() {
                 if !schema["discriminator"].is_null() {
-                    return Schema::PolymorphicBaseImpl(schema.clone())
+                    return Schema::PolymorphicObjectImpl(schema.clone())
                 }
                 return Schema::ObjectImpl(schema.clone());
             }
@@ -589,9 +581,9 @@ fn main() {
     let mut root = root.unwrap();
 
     sanitize_paths(&mut root);
-    sanitize_request_bodies(&mut root);
-    sanitize_header(&mut root);
-    sanitize_schemas(&mut root);
+    sanitize_request_bodies(&mut state, &mut root);
+    sanitize_header(&mut state, &mut root);
+    sanitize_schemas(&mut state, &mut root);
 
     collect_operations(&mut state, &root["paths"]);
     collect_struct_names(&mut state, &root);
@@ -630,14 +622,14 @@ fn copy_json_item<T: ToString>(root: &JsonValue, path: T) -> JsonValue {
     ele.clone()
 }
 
-fn sanitize_request_bodies(root: &mut JsonValue) {
+fn sanitize_request_bodies(state: &mut State, root: &mut JsonValue) {
     let mut x = 100i32;
     loop {
         x -= 1;
         if x < 0 {
             panic!("Too much recursion!")
         }
-        sanitize_schemas(root);
+        sanitize_schemas(state, root);
         let old_state = root["components"]["requestBodies"].clone();
         for (name, value) in old_state.entries() {
             if !value["$ref"].is_null() {
@@ -661,12 +653,12 @@ fn sanitize_request_bodies(root: &mut JsonValue) {
             }
             for (content_type, content) in value["content"].entries() {
                 match classify_schema(&content["schema"]) {
-                    Schema::Invalid | Schema::PolymorphicBaseImpl(_)=> panic!("#/compoments/requestBodies/{}/content/{} is invalid", name, content_type),
+                    Schema::Invalid => panic!("#/compoments/requestBodies/{}/content/{} is invalid", name, content_type),
                     Schema::String | Schema::Int64 | Schema::Int32 | Schema::Any | Schema::Ref(_) |
                     Schema::StringArray | Schema::Int64Array | Schema::Int32Array | Schema::AnyArray |
                     Schema::AnyMap | Schema::StringMap | Schema::Int64Map | Schema::Int32Map
                     => {}
-                    Schema::CompositeAllObjectImpl(_) | Schema::CompositeAnyObjectImpl(_) | Schema::CompositeOneObjectImpl(_) | Schema::ObjectImpl(_) | Schema::RefArray(_) | Schema::ImplArray(_) |  Schema::RefMap(_) | Schema::ImplMap(_)
+                    Schema::PolymorphicObjectImpl(_) | Schema::CompositeAllObjectImpl(_) | Schema::CompositeAnyObjectImpl(_) | Schema::CompositeOneObjectImpl(_) | Schema::ObjectImpl(_) | Schema::RefArray(_) | Schema::ImplArray(_) |  Schema::RefMap(_) | Schema::ImplMap(_)
                     => {
                         root["components"]["requestBodies"][name]["content"][content_type]["schema"] =
                             move_schema_implementation(&root["components"]["requestBodies"][name]["content"][content_type]["schema"].clone(),
@@ -683,14 +675,14 @@ fn sanitize_request_bodies(root: &mut JsonValue) {
     }
 }
 
-fn sanitize_header(root: &mut JsonValue) {
+fn sanitize_header(state: &mut State, root: &mut JsonValue) {
     let mut x = 100i32;
     loop {
         x -= 1;
         if x < 0 {
             panic!("Too much recursion!")
         }
-        sanitize_schemas(root);
+        sanitize_schemas(state, root);
         let old_state = root["components"]["headers"].clone();
         for (name, value) in old_state.entries() {
             if !value["$ref"].is_null() {
@@ -742,7 +734,7 @@ fn sanitize_header(root: &mut JsonValue) {
     }
 }
 
-fn sanitize_schemas(root: &mut JsonValue) {
+fn sanitize_schemas(state: &mut State, root: &mut JsonValue) {
     let mut x = 100i32;
     loop {
         x-=1;
@@ -802,9 +794,25 @@ fn sanitize_schemas(root: &mut JsonValue) {
                         match classify_schema(child) {
                             Schema::Ref(referent) => {
                                 root["components"]["schemas"][name]["allOf"][idx] = root["components"]["schemas"][referent.as_str()].clone();
+                                match classify_schema(&root["components"]["schemas"][name]["allOf"][idx]) {
+                                    Schema::PolymorphicObjectImpl(_) => {
+                                        if !state.poly_map.contains_key(&referent) {
+                                            state.poly_map.insert(referent.clone(), HashSet::new());
+                                        }
+
+                                        state.poly_map.get_mut(&referent).unwrap().insert(name.to_string());
+                                    }
+                                    _=> (),
+
+                                }
                                 continue 'outer;
                             }
                             Schema::ObjectImpl(implementation) => {
+                                for (field_name, field_schema) in implementation["properties"].entries() {
+                                    merged["properties"][field_name] = field_schema.clone();
+                                }
+                            }
+                            Schema::PolymorphicObjectImpl(implementation) => {
                                 for (field_name, field_schema) in implementation["properties"].entries() {
                                     merged["properties"][field_name] = field_schema.clone();
                                 }
@@ -1140,6 +1148,83 @@ fn generate_any_object_model(state: &mut State, name: &str, object: &JsonValue) 
     state.push(format!("    }}\n"));
     state.push(format!("}}\n"));
 }
+
+fn generate_poly_object_model(state: &mut State, name: &str, object: &JsonValue) {
+    let struct_name_string = state.struct_name_map.get(name).unwrap().clone();
+    let struct_name = struct_name_string.as_str();
+
+    let polys = state.poly_map.get(name).unwrap().clone();
+    let discriminator = object["discriminator"]["propertyName"].as_str().unwrap();
+
+    state.push("\n#[derive(Debug, Clone, Hash, PartialEq, Eq)]\n");
+    state.push(format!("pub enum {} {{\n", struct_name));
+    for n in polys.iter() {
+        let poly_name = state.struct_name_map.get(n.as_str()).unwrap().clone();
+        state.push(format!("    {poly_name}({poly_name}),\n"));
+    }
+    state.push("}\n");
+    state.push(format!("option_wrapper!(O{}, {});\n", struct_name, struct_name));
+    state.push(format!("as_request_body!({});\n", struct_name));
+
+    state.push(format!("\nimpl Default for {} {{\n", struct_name));
+    state.push("    fn default() -> Self {\n");
+    for n in polys.iter() {
+        let poly_name = state.struct_name_map.get(n.as_str()).unwrap().clone();
+        state.push(format!("        {struct_name}::{poly_name}({poly_name}::default())\n"));
+        break;
+    }
+    state.push("    }\n");
+    state.push("}\n");
+
+    state.push(format!("\nimpl Into<JsonValue> for {} {{\n", struct_name));
+    state.push("    fn into(self) -> JsonValue {\n");
+    state.push("        match self {\n");
+    for n in polys.iter() {
+        let poly_name = state.struct_name_map.get(n.as_str()).unwrap().clone();
+        state.push(format!("            {struct_name}::{poly_name}(value) => value.into(),\n"));
+    }
+    state.push("        }\n");
+    state.push("    }\n");
+    state.push("}\n");
+
+    state.push(format!("\nimpl Into<JsonValue> for &{} {{\n", struct_name));
+    state.push("    fn into(self) -> JsonValue {\n");
+    state.push("        match self {\n");
+    for n in polys.iter() {
+        let poly_name = state.struct_name_map.get(n.as_str()).unwrap().clone();
+        state.push(format!("            {struct_name}::{poly_name}(value) => {{\n"));
+        state.push("                let mut result : JsonValue = value.into();\n");
+        state.push(format!("                result[\"{discriminator}\"] = JsonValue::String(\"{n}\".to_string());\n"));
+        state.push("                result\n");
+        state.push("            }\n");
+    }
+    state.push("        }\n");
+    state.push("    }\n");
+    state.push("}\n");
+
+
+    state.push(format!("\nimpl TryFrom<&JsonValue> for {} {{\n", struct_name));
+    state.push("    type Error = String;\n");
+    state.push("    fn try_from(value: &JsonValue) -> Result<Self, String> {\n");
+    state.push("        if value.is_null() {\n");
+    state.push("            return Err(\"Non null expected\".to_string());\n");
+    state.push("        }\n");
+
+    state.push(format!("        let Some(discriminator) = value[\"{discriminator}\"].as_str() else {{\n"));
+    state.push("            return Err(\"Discriminator is not a String\".to_string());\n");
+    state.push("        };\n");
+    state.push("        match discriminator {\n");
+    for n in polys.iter() {
+        let poly_name = state.struct_name_map.get(n.as_str()).unwrap().clone();
+        state.push(format!("            \"{n}\" => Ok({struct_name}::{poly_name}({poly_name}::try_from(value)?)),\n"));
+    }
+    state.push("            other => Err(format!(\"Unexpected discriminator value {other}\"))\n");
+    state.push("        }\n");
+    state.push("    }\n");
+    state.push("}\n");
+
+}
+
 fn generate_one_object_model(state: &mut State, name: &str, object: &JsonValue) {
     let struct_name_string = state.struct_name_map.get(name).unwrap().clone();
     let struct_name = struct_name_string.as_str();
@@ -1236,7 +1321,7 @@ fn generate_one_object_model(state: &mut State, name: &str, object: &JsonValue) 
     state.push("            return Err(\"Non null expected\".to_string());\n");
     state.push("        }\n");
 
-    let mut push_inner = |state: &mut State, idx: usize, schema_name: &str, schema: Schema| {
+    let push_inner = |state: &mut State, idx: usize, schema_name: &str, schema: Schema| {
         if matches!(schema, Schema::Constant(_)) {
             return;
         }
@@ -1882,6 +1967,7 @@ fn escape_field_names<T: ToString>(field_properties: Vec<T>) -> HashMap<String, 
                 "type" => "type0".to_string(),
                 "let" => "let0".to_string(),
                 "struct" => "struct0".to_string(),
+                "const" => "const0".to_string(),
                 "union" => "union0".to_string(),
                 "fn" => "fn0".to_string(),
                 "return" => "return0".to_string(),
@@ -2181,6 +2267,9 @@ fn generate_model(state: &mut State, schema: &JsonValue) {
             Schema::RefArray(referent) => {
                 generate_dump_model_array(state, name, element, referent);
             }
+            Schema::PolymorphicObjectImpl(_) => {
+                generate_poly_object_model(state, name, element);
+            }
             x => panic!("Invalid schema {} {}", name, x)
         }
     }
@@ -2221,18 +2310,23 @@ fn generate_operation(state: &mut State, operation: &Operation) {
         }
         let param_name_raw = param_name_raw.unwrap().to_string();
         let param_name = field_name_map.get(&param_name_raw).unwrap();
-        let (param_type, ffi_param_type) = match classify_schema(&param_desc["schema"]) {
-            Schema::String => ("OString", "*const c_char"),
-            Schema::Int64 => ("OI64", "*const i64"),
-            Schema::Int32 => ("OI32", "*const i32"),
-            Schema::Double => ("OF64", "*const f64"),
-            Schema::Boolean => ("OBool", "*const bool"),
-            Schema::StringArray => ("&OStringArray", "*const StringArray"),
+        let (param_type, path_param, ffi_param_type) = match classify_schema(&param_desc["schema"]) {
+            Schema::String => ("OString", "impl PathParam<String>", "*const c_char"),
+            Schema::Int64 => ("OI64", "impl PathParam<i64>", "*const i64"),
+            Schema::Int32 => ("OI32", "impl PathParam<i32>", "*const i32"),
+            Schema::Double => ("OF64", "impl PathParam<f64>", "*const f64"),
+            Schema::Boolean => ("OBool", "impl PathParam<bool>", "*const bool"),
+            Schema::StringArray => ("&OStringArray", "impl PathParam<StringArray>", "*const StringArray"),
             other => panic!("{other} {} {} param type not supported yet", operation.name, param_name_raw),
         };
 
-        state.push_path(format!(", {}: {}", param_name, param_type));
-        state.push_async_path(format!(", {}: {}", param_name, param_type));
+        if param_desc["in"].as_str() == Some("path") {
+            state.push_path(format!(", {}: {}", param_name, path_param));
+            state.push_async_path(format!(", {}: {}", param_name, path_param));
+        } else {
+            state.push_path(format!(", {}: {}", param_name, param_type));
+            state.push_async_path(format!(", {}: {}", param_name, param_type));
+        }
 
         state.push_ffi(format!(", {}: {}", param_name, ffi_param_type));
     }
@@ -2479,18 +2573,36 @@ fn generate_operation(state: &mut State, operation: &Operation) {
 
         match param_desc["in"].as_str() {
             Some("path") => {
-                match classify_schema(&param_desc["schema"]) {
-                    Schema::String => {
-                        state.push_path(format!("            .add_path_param(\"{}\", {}.0.as_ref().unwrap_or(&String::default()))\n", raw_param_name, param_name));
-                        state.push_async_path(format!("            .add_path_param(\"{}\", {}.0.as_ref().unwrap_or(&String::default()))\n", raw_param_name, param_name));
-
-                    },
-                    Schema::Int64 | Schema::Int32 | Schema::Double => {
-                        state.push_path(format!("            .add_path_param(\"{}\", {}.0.as_ref().unwrap_or(&0))\n", raw_param_name, param_name));
-                        state.push_async_path(format!("            .add_path_param(\"{}\", {}.0.as_ref().unwrap_or(&0))\n", raw_param_name, param_name));
-                    },
-                    _=> panic!("{} {} param type not supported yet for path parameters", operation.name, raw_param_name),
-                };
+                match param_desc["style"].as_str() {
+                    None | Some("simple") => {
+                        if param_desc["explode"].as_bool().unwrap_or_default() {
+                            state.push_path(format!("            .add_path_param(\"{}\", {}.to_path_param_simple_explode().unwrap_or(String::default()))\n", raw_param_name, param_name));
+                            state.push_async_path(format!("            .add_path_param(\"{}\", {}.to_path_param_simple_explode().unwrap_or(String::default()))\n", raw_param_name, param_name));
+                        } else {
+                            state.push_path(format!("            .add_path_param(\"{}\", {}.to_path_param_simple().unwrap_or(String::default()))\n", raw_param_name, param_name));
+                            state.push_async_path(format!("            .add_path_param(\"{}\", {}.to_path_param_simple().unwrap_or(String::default()))\n", raw_param_name, param_name));
+                        }
+                    }
+                    Some("label") => {
+                        if param_desc["explode"].as_bool().unwrap_or_default() {
+                            state.push_path(format!("            .add_path_param(\"{}\", {}.to_path_param_label_explode().unwrap_or(String::default()))\n", raw_param_name, param_name));
+                            state.push_async_path(format!("            .add_path_param(\"{}\", {}.to_path_param_label_explode().unwrap_or(String::default()))\n", raw_param_name, param_name));
+                        } else {
+                            state.push_path(format!("            .add_path_param(\"{}\", {}.to_path_param_label().unwrap_or(String::default()))\n", raw_param_name, param_name));
+                            state.push_async_path(format!("            .add_path_param(\"{}\", {}.to_path_param_label().unwrap_or(String::default()))\n", raw_param_name, param_name));
+                        }
+                    }
+                    Some("matrix") => {
+                        if param_desc["explode"].as_bool().unwrap_or_default() {
+                            state.push_path(format!("            .add_path_param(\"{}\", {}.to_path_param_label_matrix_explode({raw_param_name}).unwrap_or(String::default()))\n", raw_param_name, param_name));
+                            state.push_async_path(format!("            .add_path_param(\"{}\", {}.to_path_param_label_matrix_explode({raw_param_name}).unwrap_or(String::default()))\n", raw_param_name, param_name));
+                        } else {
+                            state.push_path(format!("            .add_path_param(\"{}\", {}.to_path_param_label_matrix({raw_param_name}).unwrap_or(String::default()))\n", raw_param_name, param_name));
+                            state.push_async_path(format!("            .add_path_param(\"{}\", {}.to_path_param_label_matrix({raw_param_name}).unwrap_or(String::default()))\n", raw_param_name, param_name));
+                        }
+                    }
+                    Some(other) => panic!("unsupported param style {other}"),
+                }
             }
             Some("query") => {
                 match classify_schema(&param_desc["schema"]) {
