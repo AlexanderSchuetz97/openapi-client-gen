@@ -2970,7 +2970,7 @@ fn generate_operation_response_enum(state: &mut State, operation: &Operation, re
     }
 
     response_enum_constants.push(("Custom".to_string(), 3));
-    state.push("    Custom(Box<dyn Any>, StatusCode, HeaderMap)\n");
+    state.push("    Custom(Box<dyn Any+Send>, StatusCode, HeaderMap)\n");
     state.push("}\n");
 
     state.push(format!("\nimpl {} {{\n", operation.response_name));

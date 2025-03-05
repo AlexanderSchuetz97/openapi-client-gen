@@ -6964,7 +6964,7 @@ impl<T> ToJsonString for T where for<'a> &'a T: Into<JsonValue>{
     }
 }
 
-pub trait AnyRef: Send+Debug {
+pub trait AnyRef: Send+Sync+Debug {
     fn as_any_ref(&self) -> Box<&dyn Any>;
     fn as_any_ref_mut(&mut self) -> Box<&mut dyn Any>;
 }
@@ -7527,7 +7527,7 @@ fn get_content_type(response_headers: &HeaderMap) -> Option<&[u8]> {
 
 
 
-#[derive(Debug, Default)]
+#[derive(Default, Debug)]
 pub struct ApiRequestBuilder {
     pub path: String,
     pub method: String,
@@ -7536,10 +7536,33 @@ pub struct ApiRequestBuilder {
     pub path_parameters: HashMap<String, String>,
     #[cfg(feature = "blocking")]
     #[cfg(not(target_arch = "wasm32"))]
-    pub builder_blocking: Option<reqwest::blocking::RequestBuilder>,
+    builder_blocking: Option<DebugWrapper<Box<dyn FnOnce(&reqwest::blocking::Client, Method, String) -> reqwest::blocking::RequestBuilder>>>,
     #[cfg(any(feature = "async", target_arch = "wasm32"))]
-    pub builder_async: Option<reqwest::RequestBuilder>,
+    builder_async: Option<DebugWrapper<Box<dyn FnOnce(&reqwest::Client, Method, String) -> reqwest::RequestBuilder>>>,
     pub entity: Option<ApiRequestEntity>
+}
+
+#[repr(transparent)]
+struct DebugWrapper<T>(T);
+
+impl<T> Deref for DebugWrapper<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> DerefMut for DebugWrapper<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<T> Debug for DebugWrapper<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DebugWrapper")
+    }
 }
 
 impl ApiRequestBuilder {
@@ -7659,6 +7682,19 @@ impl ApiRequestBuilder {
         self
     }
 
+    #[cfg(feature = "blocking")]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_builder_factory_blocking(mut self, builder_factory: impl FnOnce(&reqwest::blocking::Client, Method, String) -> reqwest::blocking::RequestBuilder + 'static) -> Self {
+        self.builder_blocking = Some(DebugWrapper(Box::new(builder_factory)));
+        self
+    }
+
+    #[cfg(any(feature = "async", target_arch = "wasm32"))]
+    pub fn set_builder_factory_async(mut self, builder_factory: impl FnOnce(&reqwest::Client, Method, String) -> reqwest::RequestBuilder + 'static) -> Self {
+        self.builder_async = Some(DebugWrapper(Box::new(builder_factory)));
+        self
+    }
+
     #[cfg(any(feature = "async", target_arch = "wasm32"))]
     pub async fn build_async<T: ToString>(self, base_url: T, client: &reqwest::Client) -> Result<reqwest::Request, ApiError> {
         let method = Method::from_str(self.method.as_str());
@@ -7684,7 +7720,7 @@ impl ApiRequestBuilder {
 
         let mut builder = match self.builder_async {
             None => client.request(method.unwrap(), url),
-            Some(bld) => bld,
+            Some(bld) => bld.0(client, method.unwrap(), url),
         };
 
         builder = match self.entity {
@@ -7730,7 +7766,7 @@ impl ApiRequestBuilder {
 
         let mut builder = match self.builder_blocking {
             None => client.request(method.unwrap(), url),
-            Some(bld) => bld,
+            Some(bld) => bld.0(client, method.unwrap(), url),
         };
 
         builder = match self.entity {
